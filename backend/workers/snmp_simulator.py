@@ -25,6 +25,7 @@ HIDE_NOT_ACCESSIBLE = True
 SYSTEM_MIB_DIR = "/usr/share/snmp/mibs"
 
 class MibDataGenerator:
+
     def get_value(self, syntax_obj, custom_val=None):
         # 1. Custom Value
         if custom_val is not None:
@@ -39,6 +40,8 @@ class MibDataGenerator:
                 elif "IpAddress" in type_name: return v2c.IpAddress(str(custom_val))
                 elif any(x in type_name for x in ["Oid", "ObjectIdentifier", "AutonomousType"]):
                     return v2c.ObjectIdentifier(str(custom_val))
+                
+                # Try generic digit parsing if no type matched
                 if str(custom_val).isdigit(): return v2c.Integer32(int(custom_val))
             except Exception as e:
                 logger.warning(f"Failed to apply custom value '{custom_val}': {e}")
@@ -46,6 +49,7 @@ class MibDataGenerator:
         # 2. Random Fallback
         try:
             type_name = syntax_obj.__class__.__name__
+
             if any(x in type_name for x in ["Oid", "ObjectIdentifier", "AutonomousType"]):
                 return v2c.ObjectIdentifier(f"1.3.6.1.2.1.{random.randint(1,100)}")
             elif "Integer" in type_name: return v2c.Integer32(random.randint(1, 100))
@@ -55,7 +59,16 @@ class MibDataGenerator:
             elif "Counter" in type_name: return v2c.Counter32(random.randint(1000, 999999))
             elif "TimeTicks" in type_name: return v2c.TimeTicks(random.randint(0, 5000000))
             elif "IpAddress" in type_name: return v2c.IpAddress("127.0.0.1")
+            
+            # --- FIX: Handle PhysAddress specifically ---
+            elif "PhysAddress" in type_name or "MacAddress" in type_name:
+                # Generate random MAC (6 bytes)
+                mac_bytes = bytes([random.randint(0, 255) for _ in range(6)])
+                return v2c.OctetString(mac_bytes)
+            # --------------------------------------------
+
             elif "String" in type_name: return v2c.OctetString(f"Sim-{random.randint(1,99)}")
+            
             else: return v2c.Integer32(0)
         except: 
             return v2c.Integer32(0)
@@ -66,6 +79,7 @@ class MockController:
         self.sorted_oids = sorted(self.db.keys())
 
     def read_variables(self, *var_binds, **kwargs):
+        logger.debug(f"RX GET: {var_binds}")
         rsp = []
         for oid, val in var_binds:
             key = tuple(oid)
@@ -76,6 +90,7 @@ class MockController:
         return rsp
 
     def read_next_variables(self, *var_binds, **kwargs):
+        logger.debug(f"RX WALK/NEXT: {var_binds}")
         rsp = []
         for oid, val in var_binds:
             current_oid = tuple(oid)

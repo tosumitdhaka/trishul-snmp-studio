@@ -1,38 +1,46 @@
 import subprocess
+import logging
 import re
 import time
 import sys
 from core.config import settings
 
+logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
+logger = logging.getLogger("walk-engine")
+
 class WalkEngine:
     @staticmethod
     def run_snmpwalk(host, port, community, oid, use_mibs=True):
-        # 1. Sanitize Inputs (Strip whitespace)
-        host = host.strip()
-        oid = oid.strip()
+        # 1. Sanitize Inputs
+        host = str(host).strip()
+        oid = str(oid).strip()
+        community = str(community).strip()
+        
+        # Validation
+        if not host: return {"error": "Host cannot be empty"}
+        if not oid: return {"error": "OID cannot be empty"}
+        
         target = f"{host}:{port}"
         
         # 2. Build Command
-        # Base command
         cmd = ["snmpwalk", "-v2c", "-c", community]
 
-        # 3. Handle MIBs vs Raw
         if use_mibs:
-            # Use MIBs: Output Enum/Names (-Oe), Load Custom MIBs (-M), Load ALL (-m)
+            # Use MIBs: Output Enum/Names (-Oe), Load Custom + ALL MIBs
             cmd.extend(["-Oe", "-M", f"+{settings.MIB_DIR}", "-m", "ALL"])
         else:
-            # No MIBs: Numeric Output (-On) ONLY. 
-            # Do NOT pass -M or -m to avoid loading errors or overhead.
+            # No MIBs: Numeric Output (-On) ONLY.
             cmd.append("-On")
 
-        # 4. Common Options (Log errors to stderr, Don't check time)
-        cmd.extend(["-Le", "-u", target, oid])
+        # Common Options: Log errors to stderr (-Le), Don't check time (-u)
+        cmd.extend(["-Le", target, oid])
         
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
             
+            # Check for non-zero exit code
             if result.returncode != 0:
-                # ... (Keep existing error filtering logic) ...
+                # Filter out common "noise" warnings to find the real error
                 error_lines = result.stderr.splitlines()
                 clean_errors = [
                     line for line in error_lines 
@@ -40,6 +48,8 @@ class WalkEngine:
                 ]
                 final_error = "\n".join(clean_errors) if clean_errors else result.stderr.splitlines()[-1]
                 return {"error": f"snmpwalk failed: {final_error}"}
+
+            logger.debug(f"received {len(result.stdout.splitlines())} lines from snmpwalk")
 
             return result.stdout.splitlines()
             
@@ -50,7 +60,6 @@ class WalkEngine:
 
     @staticmethod
     def parse_output(lines, target_host, root_oid):
-        # ... (Keep the rest of your parsing logic exactly the same) ...
         parsed_data = {}
         category = root_oid.split("::")[1] if "::" in root_oid else root_oid
         
@@ -63,10 +72,12 @@ class WalkEngine:
             index = ""
             raw_value = ""
 
+            # Try MIB format first
             match = regex_mib.match(line)
             if match:
                 module, obj_name, index, raw_value = match.groups()
             else:
+                # Try Raw format
                 match_raw = regex_raw.match(line)
                 if match_raw:
                     full_name = match_raw.group(1)
@@ -83,6 +94,7 @@ class WalkEngine:
             # Type Cleaning
             if ": " in raw_value:
                 val_type, val_data = raw_value.split(": ", 1)
+                # Handle nested types logic (simplified for brevity)
                 if ": " in val_data:
                     possible_type, possible_val = val_data.split(": ", 1)
                     if possible_type.strip() in ["INTEGER", "STRING", "Gauge32", "Counter32", "Counter64", "OID", "IpAddress", "TimeTicks", "Unsigned32"]:
@@ -96,6 +108,7 @@ class WalkEngine:
             if index not in parsed_data:
                 parsed_data[index] = {"index": index, "labels": {}, "metrics": {}}
 
+            # Metric Heuristics
             is_metric = False
             metric_types = ["Counter32", "Counter64", "Gauge32", "Integer", "INTEGER", "Unsigned32", "TimeTicks"]
             
@@ -104,7 +117,7 @@ class WalkEngine:
                     is_metric = False
                 else:
                     is_metric = True
-
+            
             if "TimeTicks" in val_type:
                 ticks_match = re.search(r'\((\d+)\)', val_data)
                 if ticks_match: val_data = int(ticks_match.group(1)) / 100.0
@@ -125,9 +138,9 @@ class WalkEngine:
             else:
                 parsed_data[index]["labels"][obj_name] = val_data
 
+        # Flatten to List
         output_list = []
         current_time = int(time.time())
-
         for idx, entry in parsed_data.items():
             row_labels = entry["labels"]
             row_labels["snmp_index"] = entry["index"]
@@ -142,4 +155,7 @@ class WalkEngine:
                     "timestamp": current_time,
                     "labels": row_labels.copy()
                 })
+
+        logger.debug(f"Parsed {len(output_list)} metrics/labels from SNMP walk output")
+
         return output_list

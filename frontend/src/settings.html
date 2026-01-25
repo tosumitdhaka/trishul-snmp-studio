@@ -1,11 +1,35 @@
-<div class="row justify-content-center mt-5">
-    <div class="col-md-6 text-center">
-        <div class="card shadow-sm p-5">
-            <div class="display-4 text-muted mb-3">
-                <i class="fas fa-tools"></i>
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6 col-lg-5">
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <i class="fas fa-user-shield me-2 text-primary"></i> Authentication
             </div>
-            <h3>Settings</h3>
-            <p class="text-muted">Configuration modules (Auth, Global Defaults) are under construction.</p>
+            <div class="card-body">
+                <p class="text-muted small">Update the login credentials for the application.</p>
+                
+                <form onsubmit="SettingsModule.updateAuth(event)">
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Username</label>
+                        <input type="text" class="form-control" id="set-auth-user" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">New Password</label>
+                        <input type="password" class="form-control" id="set-auth-pass" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Confirm Password</label>
+                        <input type="password" class="form-control" id="set-auth-pass-confirm" required>
+                    </div>
+                    
+                    <div id="auth-msg" class="alert alert-danger d-none small py-2 mb-3"></div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary">
+                            <i class="fas fa-save"></i> Update Credentials
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
 </div>

@@ -1,13 +1,58 @@
 const API_BASE = "/api";
 const HTML_CACHE = {}; 
-let currentModule = null; // Track active module for cleanup
+let currentModule = null; 
 
+// Global State
 window.AppState = {
     simulator: null,
     logs: []
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+    // 1. Initialize Auth Flow
+    initAuth();
+});
+
+async function initAuth() {
+    const overlay = document.getElementById("auth-overlay");
+    const wrapper = document.getElementById("wrapper");
+    const statusText = document.getElementById("auth-status-text");
+
+    try {
+        // Attempt to hit a protected endpoint
+        const res = await fetch('/api/settings/check');
+        
+        if (res.ok) {
+            // 1. Stop Overlay from blocking clicks immediately
+            overlay.style.pointerEvents = 'none';
+            
+            // 2. Reveal the App (behind the overlay)
+            wrapper.style.display = 'flex';
+            
+            // 3. Initialize Logic (Sidebar, Routing) immediately
+            initializeAppLogic();
+
+            // 4. Start Fade Out
+            overlay.style.transition = "opacity 0.5s ease";
+            overlay.style.opacity = '0';
+            
+            // 5. Remove from DOM flow after fade
+            setTimeout(() => {
+                overlay.style.display = 'none';
+            }, 500);
+            
+        } else {
+            statusText.textContent = "Authentication Required. Please refresh.";
+            statusText.className = "mt-3 text-danger fw-bold";
+        }
+    } catch (e) {
+        statusText.textContent = "Connection Failed. Backend offline?";
+        statusText.className = "mt-3 text-danger fw-bold";
+    }
+}
+
+
+function initializeAppLogic() {
     // 1. Sidebar Toggle
     const sidebarToggle = document.querySelector('#sidebarToggle');
     if (sidebarToggle) {
@@ -21,7 +66,7 @@ document.addEventListener("DOMContentLoaded", () => {
     checkBackendHealth();
     window.addEventListener('hashchange', handleRouting);
     handleRouting(); 
-});
+}
 
 async function handleRouting() {
     let moduleName = window.location.hash.substring(1) || 'dashboard';

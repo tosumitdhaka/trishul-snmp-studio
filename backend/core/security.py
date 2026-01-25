@@ -9,14 +9,23 @@ security = HTTPBasic()
 SECRETS_FILE = os.path.join(settings.CONFIG_DIR, "secrets.json")
 
 def get_credentials():
-    """Load creds from file or return default"""
-    if not os.path.exists(SECRETS_FILE):
-        return {"username": "admin", "password": "admin"}
-    try:
-        with open(SECRETS_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return {"username": "admin", "password": "admin"}
+    """
+    Priority:
+    1. secrets.json (if exists - meaning user changed it)
+    2. Environment Variables (ADMIN_USER / ADMIN_PASS)
+    3. Default (admin / admin)
+    """
+    if os.path.exists(SECRETS_FILE):
+        try:
+            with open(SECRETS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            pass # Fallback if file is corrupt
+            
+    return {
+        "username": os.getenv("ADMIN_USER", "admin"),
+        "password": os.getenv("ADMIN_PASS", "admin")
+    }
 
 def save_credentials(username, password):
     os.makedirs(settings.CONFIG_DIR, exist_ok=True)
@@ -26,7 +35,7 @@ def save_credentials(username, password):
 def validate_auth(credentials: HTTPBasicCredentials = Depends(security)):
     stored = get_credentials()
     
-    # Secure comparison to prevent timing attacks
+    # Secure comparison
     is_user_ok = secrets.compare_digest(credentials.username, stored["username"])
     is_pass_ok = secrets.compare_digest(credentials.password, stored["password"])
     

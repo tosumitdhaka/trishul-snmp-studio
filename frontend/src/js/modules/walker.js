@@ -26,7 +26,7 @@ window.WalkerModule = {
         const output = document.getElementById("walk-output");
         const countBadge = document.getElementById("walk-count");
         
-        // Inputs
+        // 1. Get Inputs
         const target = document.getElementById("walk-target").value;
         const port = parseInt(document.getElementById("walk-port").value);
         const community = document.getElementById("walk-comm").value;
@@ -34,13 +34,15 @@ window.WalkerModule = {
         const parse = document.getElementById("walk-parse-toggle").checked;
         const use_mibs = document.getElementById("walk-use-mibs").checked;
 
-        // Loading UI
+        // 2. UI Loading State
         const originalText = btn.innerHTML;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Running...';
         btn.disabled = true;
         output.textContent = "Walking...";
+        output.className = "m-0 p-3 h-100 border-0 bg-light text-muted";
 
         try {
+            // 3. Call API
             const res = await fetch('/api/walk/execute', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -48,24 +50,37 @@ window.WalkerModule = {
             });
 
             const data = await res.json();
+            console.log("Walker API Response:", data); // <--- Check Browser Console if this appears
+
             if (!res.ok) throw new Error(data.detail || "Walk failed");
 
+            // 4. Handle Success
             this.lastData = data.data;
             countBadge.textContent = `${data.count} items`;
             
-            // Render
-            if (parse) {
+            // Update Style
+            output.className = "m-0 p-3 h-100 border-0 bg-white text-dark font-monospace";
+
+            // 5. Robust Rendering (Rely on Server Mode, not Checkbox)
+            if (data.mode === 'parsed') {
                 output.textContent = JSON.stringify(data.data, null, 2);
             } else {
-                // Raw Lines
-                output.textContent = Array.isArray(data.data) ? data.data.join("\n") : data.data;
+                // Handle Raw (Array of strings)
+                if (Array.isArray(data.data)) {
+                    output.textContent = data.data.join("\n");
+                } else {
+                    output.textContent = String(data.data);
+                }
             }
 
         } catch (e) {
+            console.error("Walker Error:", e);
             output.textContent = `Error: ${e.message}`;
+            output.className = "m-0 p-3 h-100 border-0 bg-light text-danger fw-bold";
             countBadge.textContent = "0 items";
             this.lastData = null;
         } finally {
+            // 6. Reset Button
             btn.innerHTML = originalText;
             btn.disabled = false;
         }
