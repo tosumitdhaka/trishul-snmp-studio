@@ -16,9 +16,7 @@ from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.smi import builder, compiler
 from pysnmp.proto.api import v2c
 
-# Setup Logging
-logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
-logger = logging.getLogger("simulator")
+logger = logging.getLogger(__name__)
 
 HIDE_DEPRECATED = True
 HIDE_NOT_ACCESSIBLE = True 

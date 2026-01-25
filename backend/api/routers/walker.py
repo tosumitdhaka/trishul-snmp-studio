@@ -1,3 +1,4 @@
+import logging
 import traceback
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -5,6 +6,8 @@ from services.walk_engine import WalkEngine
 from core.config import settings
 
 router = APIRouter(prefix="/walk", tags=["Walker"])
+
+logger = logging.getLogger(__name__)
 
 class WalkRequest(BaseModel):
     target: str = "127.0.0.1"

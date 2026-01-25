@@ -2,7 +2,10 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.meta import meta
 from core.security import validate_auth
+from core.logging import setup_logging
 from api.routers import simulator, walker, files, settings as settings
+
+setup_logging()
 
 app = FastAPI(title=meta.NAME, version=meta.VERSION)
 

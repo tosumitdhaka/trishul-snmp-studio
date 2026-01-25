@@ -2,7 +2,10 @@ import subprocess
 import sys
 import os
 import signal
+import logging
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 class SimulatorManager:
     _process = None

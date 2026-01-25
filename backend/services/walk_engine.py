@@ -5,8 +5,7 @@ import time
 import sys
 from core.config import settings
 
-logging.basicConfig(format='[%(levelname)s] %(message)s', level=logging.INFO)
-logger = logging.getLogger("walk-engine")
+logger = logging.getLogger(__name__)
 
 class WalkEngine:
     @staticmethod

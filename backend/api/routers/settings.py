@@ -1,8 +1,11 @@
+import logging
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from core.security import save_credentials, validate_auth
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
+
+logger = logging.getLogger(__name__)
 
 class AuthUpdate(BaseModel):
     username: str

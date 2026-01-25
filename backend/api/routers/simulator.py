@@ -1,8 +1,11 @@
+import logging
 from fastapi import APIRouter
 from services.sim_manager import SimulatorManager
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/simulator", tags=["Simulator"])
+
+logger = logging.getLogger(__name__)
 
 class SimConfig(BaseModel):
     port: int = None

@@ -13,4 +13,9 @@ class Settings:
     SNMP_PORT = int(os.getenv("SNMP_PORT", 1061))
     COMMUNITY = os.getenv("SNMP_COMMUNITY", "public")
 
+    LOG_LEVEL: str = "INFO"  # Options: DEBUG, INFO, WARNING, ERROR
+
+    class Config:
+        env_file = ".env"
+
 settings = Settings()

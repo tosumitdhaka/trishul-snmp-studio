@@ -1,9 +1,12 @@
 import os
 import shutil
 import json
+import logging
 import aiofiles
 from fastapi import UploadFile
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 class FileService:
     @staticmethod

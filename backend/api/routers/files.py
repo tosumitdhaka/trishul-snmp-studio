@@ -1,9 +1,12 @@
+import logging
 from typing import List
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from services.file_service import FileService
 from services.sim_manager import SimulatorManager
 
 router = APIRouter(prefix="/files", tags=["Files"])
+
+logger = logging.getLogger(__name__)
 
 # --- MIB Management ---
 @router.get("/mibs")
