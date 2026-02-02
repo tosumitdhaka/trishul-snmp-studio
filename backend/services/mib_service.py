@@ -326,48 +326,94 @@ class MibService:
     def resolve_oid(self, oid: str, mode: str = "name") -> str:
         """Resolve OID to name or vice versa"""
         try:
-            if mode == "name":
-                oid_tuple = tuple(int(x) for x in oid.strip('.').split('.'))
-                oid_obj, label, suffix = self.mib_view.getNodeName(oid_tuple)
+            if mode == "numeric":
+                # Name → Numeric
+                if "::" not in oid:
+                    # Already numeric
+                    return oid
                 
-                # Try to find MIB module name
-                for module_name, symbols in self.mib_builder.mibSymbols.items():
-                    for symbol_name, symbol_obj in symbols.items():
-                        if hasattr(symbol_obj, 'name') and symbol_obj.name == oid_obj:
-                            result = f"{module_name}::{symbol_name}"
-                            if suffix:
-                                result += "." + ".".join(map(str, suffix))
-                            return result
+                parts = oid.split("::")
+                if len(parts) != 2:
+                    logger.warning(f"Invalid OID format: {oid}")
+                    return oid
                 
-                # Fallback
-                meaningful_labels = [l for l in label if l not in ['iso', 'org', 'dod', 'internet', 'mgmt', 'mib-2', 'private', 'enterprises']]
+                module, name_with_index = parts
                 
-                if meaningful_labels:
-                    result = "::".join(meaningful_labels[-2:]) if len(meaningful_labels) >= 2 else meaningful_labels[-1]
+                # Check if MIB is loaded
+                if module not in self.mib_builder.mibSymbols:
+                    logger.error(f"MIB module '{module}' not loaded")
+                    return oid
+                
+                # Handle index (e.g., "sysUpTime.0")
+                if "." in name_with_index:
+                    name, index = name_with_index.rsplit(".", 1)
                 else:
-                    result = "::".join(label[-2:]) if len(label) >= 2 else label[-1]
+                    name = name_with_index
+                    index = None
                 
-                if suffix:
-                    result += "." + ".".join(map(str, suffix))
+                # Look up the symbol in the MIB
+                if name not in self.mib_builder.mibSymbols[module]:
+                    logger.error(f"Symbol '{name}' not found in module '{module}'")
+                    return oid
                 
-                return result
+                symbol_obj = self.mib_builder.mibSymbols[module][name]
+                
+                # Get the OID from the symbol
+                if hasattr(symbol_obj, 'name'):
+                    oid_tuple = symbol_obj.name
+                    numeric = ".".join(map(str, oid_tuple))
+                    
+                    # Add index if present
+                    if index:
+                        numeric += "." + index
+                    
+                    logger.debug(f"Resolved {oid} -> {numeric}")
+                    return numeric
+                else:
+                    logger.error(f"Symbol '{name}' has no OID")
+                    return oid
             
-            elif mode == "numeric":
+            elif mode == "name":
+                # Numeric → Name
                 if "::" in oid:
-                    module, name = oid.split("::", 1)
-                    if "." in name:
-                        name, index = name.split(".", 1)
-                        oid_obj, label, suffix = self.mib_view.getNodeName((module, name))
-                        return ".".join(map(str, oid_obj)) + "." + index
+                    # Already symbolic
+                    return oid
+                
+                oid_tuple = tuple(int(x) for x in oid.strip('.').split('.'))
+                
+                try:
+                    oid_obj, label, suffix = self.mib_view.getNodeName(oid_tuple)
+                    
+                    # Try to find MIB module name
+                    for module_name, symbols in self.mib_builder.mibSymbols.items():
+                        for symbol_name, symbol_obj in symbols.items():
+                            if hasattr(symbol_obj, 'name') and symbol_obj.name == oid_obj:
+                                result = f"{module_name}::{symbol_name}"
+                                if suffix:
+                                    result += "." + ".".join(map(str, suffix))
+                                return result
+                    
+                    # Fallback
+                    meaningful_labels = [l for l in label if l not in ['iso', 'org', 'dod', 'internet', 'mgmt', 'mib-2', 'private', 'enterprises']]
+                    
+                    if meaningful_labels:
+                        result = "::".join(meaningful_labels[-2:]) if len(meaningful_labels) >= 2 else meaningful_labels[-1]
                     else:
-                        oid_obj, label, suffix = self.mib_view.getNodeName((module, name))
-                        return ".".join(map(str, oid_obj))
-                else:
+                        result = "::".join(label[-2:]) if len(label) >= 2 else label[-1]
+                    
+                    if suffix:
+                        result += "." + ".".join(map(str, suffix))
+                    
+                    return result
+                except Exception as e:
+                    logger.debug(f"Name resolution failed: {e}")
                     return oid
         
         except Exception as e:
-            logger.debug(f"OID resolution failed for '{oid}': {e}")
+            logger.error(f"OID resolution failed for '{oid}': {e}")
             return oid
+
+
     
     def get_trap_details(self, trap_identifier: str) -> Optional[dict]:
         """Get detailed information about a specific trap"""

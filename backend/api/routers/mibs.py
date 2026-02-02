@@ -2,11 +2,10 @@ import os
 import logging
 import tempfile
 import shutil
-from typing import List, Set
+from typing import List
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from services.mib_service import get_mib_service
-from services.file_service import FileService
 from services.sim_manager import SimulatorManager
 from services.trap_manager import trap_manager
 from core.config import settings
@@ -27,6 +26,61 @@ class BatchValidationResponse(BaseModel):
     global_missing_deps: List[str] = []
     can_upload: bool
 
+# ==================== Helper Functions ====================
+
+def save_mib_file(file: UploadFile) -> str:
+    """Save uploaded MIB file"""
+    try:
+        os.makedirs(settings.MIB_DIR, exist_ok=True)
+        
+        file_path = os.path.join(settings.MIB_DIR, file.filename)
+        
+        with open(file_path, 'wb') as f:
+            content = file.file.read()
+            f.write(content)
+        
+        logger.info(f"Saved MIB file: {file.filename}")
+        return file.filename
+    
+    except Exception as e:
+        logger.error(f"Failed to save MIB file {file.filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+def delete_mib_file(filename: str) -> bool:
+    """Delete MIB file"""
+    try:
+        file_path = os.path.join(settings.MIB_DIR, filename)
+        
+        if not os.path.exists(file_path):
+            return False
+        
+        os.remove(file_path)
+        logger.info(f"Deleted MIB file: {filename}")
+        return True
+    
+    except Exception as e:
+        logger.error(f"Failed to delete MIB file {filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
+
+def list_mib_files() -> List[str]:
+    """List all MIB files"""
+    try:
+        if not os.path.exists(settings.MIB_DIR):
+            return []
+        
+        files = [
+            f for f in os.listdir(settings.MIB_DIR)
+            if f.endswith(('.mib', '.txt', '.my'))
+        ]
+        
+        return sorted(files)
+    
+    except Exception as e:
+        logger.error(f"Failed to list MIB files: {e}")
+        return []
+
+# ==================== Endpoints ====================
+
 @router.get("/status")
 def get_mib_status():
     """Get overall MIB service status"""
@@ -36,7 +90,7 @@ def get_mib_status():
 @router.get("/list")
 def list_mibs():
     """List all MIB files"""
-    return {"mibs": FileService.list_mibs()}
+    return {"mibs": list_mib_files()}
 
 @router.post("/validate-batch")
 async def validate_batch(files: List[UploadFile] = File(...)):
@@ -119,7 +173,7 @@ async def upload_mibs(files: List[UploadFile] = File(...)):
     try:
         for file in files:
             try:
-                filename = await FileService.save_mib(file)
+                filename = save_mib_file(file)
                 results.append({
                     "filename": filename,
                     "status": "saved",
@@ -200,7 +254,7 @@ def reload_mibs():
 @router.delete("/{filename}")
 def delete_mib(filename: str):
     """Delete a MIB file"""
-    if FileService.delete_mib(filename):
+    if delete_mib_file(filename):
         return {"status": "deleted", "filename": filename}
     raise HTTPException(status_code=404, detail="File not found")
 
@@ -220,5 +274,13 @@ def list_all_objects(module: str = None):
 def resolve_oid(oid: str, mode: str = "name"):
     """Resolve OID"""
     mib_service = get_mib_service()
-    result = mib_service.resolve_oid(oid, mode)
-    return {"input": oid, "output": result, "mode": mode}
+    
+    logger.info(f"Resolving OID: {oid}, mode: {mode}")
+    
+    try:
+        result = mib_service.resolve_oid(oid, mode)
+        logger.info(f"Resolution result: {oid} -> {result}")
+        return {"input": oid, "output": result, "mode": mode}
+    except Exception as e:
+        logger.error(f"Resolution failed: {e}")
+        return {"input": oid, "output": oid, "mode": mode, "error": str(e)}

@@ -192,3 +192,58 @@ pre {
     top: 0;
     z-index: 10;
 }
+
+/* MIB Manager Trap Table */
+#trap-table-body tr {
+    vertical-align: middle;
+}
+
+#trap-table-body td {
+    padding: 0.5rem 0.75rem;
+}
+
+#trap-table-body .btn-group-sm .btn {
+    font-size: 0.75rem;
+    line-height: 1.2;
+}
+
+/* Compact badges */
+.badge {
+    font-weight: 500;
+    padding: 0.25em 0.6em;
+}
+
+/* Consistent button sizing */
+.btn-xs {
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
+    line-height: 1.2;
+}
+
+.btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+}
+
+/* Inline action buttons (like in MIB manager) */
+.btn-group-sm .btn {
+    padding: 0.15rem 0.4rem;
+    font-size: 0.75rem;
+}
+
+.table-wrapper {
+  overflow: auto;           /* scroll container */
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;      /* prevents width drift when content varies */
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  background: #fff;         /* ensure header is readable when stuck */
+  z-index: 2;
+}

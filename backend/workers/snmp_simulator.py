@@ -6,9 +6,8 @@ import logging
 import asyncio
 import argparse
 
-# Add parent directory to path to import settings if run directly
+# Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.config import settings
 
 from pysnmp.entity import engine, config
 from pysnmp.entity.rfc3413 import cmdrsp, context
@@ -16,6 +15,7 @@ from pysnmp.carrier.asyncio.dgram import udp
 from pysnmp.smi import builder, compiler
 from pysnmp.proto.api import v2c
 
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
 HIDE_DEPRECATED = True
@@ -58,12 +58,10 @@ class MibDataGenerator:
             elif "TimeTicks" in type_name: return v2c.TimeTicks(random.randint(0, 5000000))
             elif "IpAddress" in type_name: return v2c.IpAddress("127.0.0.1")
             
-            # --- FIX: Handle PhysAddress specifically ---
+            # Handle PhysAddress/MacAddress
             elif "PhysAddress" in type_name or "MacAddress" in type_name:
-                # Generate random MAC (6 bytes)
                 mac_bytes = bytes([random.randint(0, 255) for _ in range(6)])
                 return v2c.OctetString(mac_bytes)
-            # --------------------------------------------
 
             elif "String" in type_name: return v2c.OctetString(f"Sim-{random.randint(1,99)}")
             
@@ -124,7 +122,7 @@ def compile_and_generate_data(mib_dir, custom_data_path):
     
     compiler.add_mib_compiler(mibBuilder, sources=sources)
     
-    # Load ALL MIBs found in the directory
+    # Load MIBs one by one, skip failures
     mibs_to_load = []
     if os.path.exists(mib_dir):
         for f in os.listdir(mib_dir):
@@ -134,10 +132,17 @@ def compile_and_generate_data(mib_dir, custom_data_path):
     if not mibs_to_load:
         logger.warning(f"No MIBs found in {mib_dir}")
     else:
-        try:
-            mibBuilder.load_modules(*mibs_to_load)
-        except Exception as e:
-            logger.error(f"MIB Load Error: {e}")
+        # Load MIBs individually to skip failures
+        loaded_count = 0
+        for mib_name in mibs_to_load:
+            try:
+                mibBuilder.load_modules(mib_name)
+                loaded_count += 1
+                logger.info(f"✓ Loaded MIB: {mib_name}")
+            except Exception as e:
+                logger.warning(f"✗ Skipped MIB {mib_name}: {str(e)[:100]}")
+        
+        logger.info(f"Loaded {loaded_count}/{len(mibs_to_load)} MIBs")
 
     custom_data = load_custom_data(custom_data_path)
     generator = MibDataGenerator()
@@ -150,7 +155,6 @@ def compile_and_generate_data(mib_dir, custom_data_path):
                     continue
 
                 if HIDE_DEPRECATED and hasattr(symbol_obj, 'getStatus'):
-                    # statuses: 'current', 'deprecated', 'obsolete'
                     if symbol_obj.getStatus() in ['deprecated', 'obsolete']:
                         continue
                 

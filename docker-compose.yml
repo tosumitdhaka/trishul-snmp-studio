@@ -7,14 +7,21 @@ services:
     container_name: snmp-studio-backend
     ports:
       - "8000:8000"      # API Access
-      - "1061:1061/udp"  # Simulator UDP Port
+      - "${SNMP_PORT:-1061}:${SNMP_PORT:-1061}/udp"  # Simulator UDP Port (configurable)
+      - "${TRAP_PORT:-1162}:${TRAP_PORT:-1162}/udp"  # Trap Receiver Port (configurable)
     volumes:
       # Mount the data folder for persistence
       - ./backend/data:/app/data
-      # Mount MIBs specifically to where Net-SNMP expects them (configured in Dockerfile)
+      # Mount MIBs specifically to where Net-SNMP expects them
       - ./backend/data/mibs:/usr/share/snmp/mibs/custom
     environment:
-      - SNMP_PORT=1061
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SNMP_PORT=${SNMP_PORT:-1061}
+      - SNMP_COMMUNITY=${SNMP_COMMUNITY:-public}
+      - TRAP_PORT=${TRAP_PORT:-1162}
+      - APP_NAME=${APP_NAME:-SNMP Studio}
+      - SESSION_TIMEOUT=${SESSION_TIMEOUT:-3600}
     restart: always
 
   # 2. The Face (Web UI)

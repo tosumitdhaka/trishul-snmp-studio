@@ -1,7 +1,6 @@
 import subprocess
 import sys
 import os
-import signal
 import logging
 from core.config import settings
 
@@ -9,39 +8,48 @@ logger = logging.getLogger(__name__)
 
 class SimulatorManager:
     _process = None
+    _port = 1061
+    _community = "public"
 
     @classmethod
     def start(cls, port=None, community=None):
-        # ... check if running ...
+        # Check if already running
+        if cls._process and cls._process.poll() is None:
+            return {"status": "already_running", "pid": cls._process.pid}
 
-        # Use overrides or defaults from settings
-        target_port = str(port) if port else str(settings.SNMP_PORT)
-        target_comm = community if community else settings.COMMUNITY
+        # Use overrides or defaults
+        cls._port = port if port else 1061
+        cls._community = community if community else "public"
+
+        mib_dir = os.path.join(settings.BASE_DIR, "data", "mibs")
+        data_file = os.path.join(settings.BASE_DIR, "data", "configs", "custom_data.json")
 
         cmd = [
             sys.executable,
             os.path.join(settings.BASE_DIR, "workers", "snmp_simulator.py"),
-            "--port", target_port,
-            "--community", target_comm,
-            "--mib-dir", settings.MIB_DIR,
-            "--data-file", settings.CUSTOM_DATA_FILE
+            "--port", str(cls._port),
+            "--community", cls._community,
+            "--mib-dir", mib_dir,
+            "--data-file", data_file
         ]
 
-        # ✅ CHANGE: Redirect stdout and stderr to the main process output
-        # This ensures errors appear in 'docker logs'
+        # Redirect stdout and stderr to main process
         cls._process = subprocess.Popen(
             cmd, 
             stdout=sys.stdout, 
             stderr=sys.stderr
         )
         
-        return {"status": "started", "pid": cls._process.pid}
+        return {
+            "status": "started", 
+            "pid": cls._process.pid,
+            "port": cls._port,
+            "community": cls._community
+        }
 
     @classmethod
     def stop(cls):
-        # Check if process object exists
         if cls._process:
-            # Check if it is actually running
             if cls._process.poll() is None:
                 cls._process.terminate()
                 try:
@@ -49,7 +57,6 @@ class SimulatorManager:
                 except subprocess.TimeoutExpired:
                     cls._process.kill()
             
-            # Clean up reference regardless
             cls._process = None
             return {"status": "stopped"}
             
@@ -58,6 +65,8 @@ class SimulatorManager:
     @classmethod
     def restart(cls):
         cls.stop()
+        import time
+        time.sleep(0.5)
         return cls.start()
 
     @classmethod
@@ -66,6 +75,6 @@ class SimulatorManager:
         return {
             "running": running,
             "pid": cls._process.pid if running else None,
-            "port": settings.SNMP_PORT,
-            "community": settings.COMMUNITY
+            "port": cls._port if running else None,
+            "community": cls._community if running else None
         }

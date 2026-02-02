@@ -1,0 +1,681 @@
+-- Revision 1.01 02/28/2019
+XDC330X-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+   MODULE-IDENTITY, OBJECT-TYPE, NOTIFICATION-TYPE,
+   Counter32, enterprises                           FROM SNMPv2-SMI
+   DisplayString                                    FROM SNMPv2-TC;
+
+endRunTechnologies MODULE-IDENTITY
+   LAST-UPDATED
+      "1902280000Z"
+   ORGANIZATION
+      "EndRun Technologies LLC"
+   CONTACT-INFO
+      "Technical Support 1-877-749-3878, support@endruntechnologies.com"
+   DESCRIPTION
+      "EndRun Technologies Enterprise MIB"
+                                  ::= { endRunTechnologiesMIB 0 }
+
+endRunTechnologiesMIB OBJECT IDENTIFIER ::= { enterprises 13827 }
+
+-- XDC330X Product Group
+
+xdc330X          OBJECT IDENTIFIER ::= { endRunTechnologiesMIB 16 }
+
+ntp              OBJECT IDENTIFIER ::= { xdc330X 1 }
+
+ntptrap          OBJECT IDENTIFIER ::= { ntp 0 }
+
+xdc              OBJECT IDENTIFIER ::= { xdc330X 2 }
+
+xdctrap          OBJECT IDENTIFIER ::= { xdc 0 }
+
+sys              OBJECT IDENTIFIER ::= { xdc330X 3 }
+
+-- ntp branch of the XDC330X subtree
+
+ntpTrapLeapIndBitsChange NOTIFICATION-TYPE
+   OBJECTS { ntpLeapIndBits }
+   STATUS current
+   DESCRIPTION
+   "A ntpTrapNTPLeapIndBitsChange trap signifies that the value of the leap
+   indicator bits contained in the NTP reply packets sent by the time server
+   has changed.  The current value of these bits is contained in the included
+   ntpLeapIndBits.  The decimal value of these bits ranges from 0 to 3:
+
+   0   is the no fault, no leap warning condition
+   1   is the no fault, leap second insertion warning condition
+   2   is the no fault, leap second deletion warning condition
+   3   is the unsynchronized, alarm condition"
+   ::= { ntptrap 1 }
+
+ntpTrapStratumChange NOTIFICATION-TYPE
+   OBJECTS { ntpStratum }
+   STATUS current
+   DESCRIPTION
+   "A ntpTrapStratumChange trap signifies that the value of the stratum
+   field contained in the NTP reply packets sent by the time server
+   has changed.  The current value is contained in the included
+   variable, ntpStratum.  The decimal value of this field ranges from 2 to 16:
+
+   2   is the synchronized, actively locked to a network stratum 1 server stratum
+   3   is the synchronized, actively locked to a network stratum 2 server stratum
+   16  is the unsynchronized stratum level"
+   ::= { ntptrap 2 }
+
+ntpTimeSinceRst OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Time since NTP daemon restart."
+   ::= { ntp 1 }
+
+ntpIRQsHandled OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Total number of Interrupts handled by the NTP daemon."
+   ::= { ntp 2 }
+
+ntpRxPkts OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Total number of NTP request packets received by the NTP daemon."
+   ::= { ntp 3 }
+
+ntpRxPktsByIRQ OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Total number of NTP request packets received via IRQ by the NTP daemon."
+   ::= { ntp 4 }
+
+ntpTxPkts OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Total number of NTP reply packets transmitted by the NTP daemon."
+   ::= { ntp 5 }
+
+ntpSentPktsPerSecond OBJECT-TYPE
+   SYNTAX INTEGER
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "NTP reply packets sent per second by the NTP daemon."
+   ::= { ntp 6 }
+
+ntpUnSentPkts OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Total number of NTP reply packets unsent by the NTP daemon."
+   ::= { ntp 7 }
+
+ntpIgnoredPkts OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Total number of NTP request packets ignored by the NTP daemon."
+   ::= { ntp 8 }
+
+ntpDroppedPkts OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Total number of NTP request packets dropped by the NTP daemon."
+   ::= { ntp 9 }
+
+ntpAuthFail OBJECT-TYPE
+   SYNTAX Counter32
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Total number of authentication failures detected by the NTP daemon."
+   ::= { ntp 10 }
+
+ntpLeapIndBits OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      noFaultorLeap   (0),
+      leapInsWarning  (1),
+      leapDelWarning  (2),
+      unSynchronized  (3)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This is a status code indicating:  normal operation, a leap second to
+   be inserted in the last minute of the current day, a leap second to be
+   deleted in the last second of the day or an alarm condition indicating
+   loss of timing synchronization.  The leap indicator field of NTP reply
+   packets sent from this server is set to ntpLeapIndBits."
+   ::= { ntp 11 }
+
+ntpSyncSource OBJECT-TYPE
+   SYNTAX DisplayString (SIZE (0..4))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This is an ASCII string identifying the synchronization source for this
+   NTP server.  It is an IP address of a stratum 1 server, or NONE.
+   If it is NONE, then the server is not synchronized, has its Leap Indicator
+   Bits in the Alarm state and is running at Stratum 16.  If it is an IP
+   address, then the server is operating as a stratum 2 server synchronized to
+   the network connected stratum 1 server whose IP address is shown.
+
+   Check the Stratum and Leap Indicator Bits for further information.
+   NTP reply packets from this server will have the reference
+   identifier field set to ntpSyncSource."
+   ::= { ntp 12 }
+
+ntpOffsetToReference OBJECT-TYPE
+   SYNTAX DisplayString (SIZE (0..16))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This is an ASCII string containing the floating value of the current
+   offset in units of seconds of the NTP server CPU clock to the reference
+   server time.  Positive values imply that the NTP server clock is
+   ahead of the reference server time."
+   ::= { ntp 13 }
+
+ntpFreqOffsetToReference OBJECT-TYPE
+   SYNTAX DisplayString (SIZE (0..16))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This is an ASCII string containing the floating value of the current
+   offset in units of Parts Per Million (PPM) of the NTP server CPU clock 
+   oscillator relative to the reference server frequency.  Positive values 
+   imply that the NTP server clock oscillator is running fast relative to 
+   the reference server."
+   ::= { ntp 14 }
+
+ntpStratum OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      ntpStratumTwo          (2),
+      ntpStratumThree        (3),
+      ntpStratumUnsync      (16)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This is an integer showing the current stratum level being reported by
+   the NTP daemon in its reply packets to clients.  If it is less than 16, 
+   it is synchronized to a network connected NTP server operating at one 
+   stratum lower.  If it is 16, then the server is unambiguously unsynchronized.
+
+   NTP clients on the network should be configured to not use the time from
+   this server if the stratum is 16."
+   ::= { ntp 15 }
+
+-- xdc branch of the XDC330X subtree
+
+xdcTrapAlarmGroup1StatusChange NOTIFICATION-TYPE
+   OBJECTS { xdcAlarmGroup1Status }
+   STATUS current
+   DESCRIPTION
+   "A xdcTrapAlarmGroup1StatusChange trap signifies that the value of the
+   Group 1 characters reported by the CLI alarmstat command has changed.  The 
+   current value is contained in the included xdcAlarmGroup1Status."
+   ::= { xdctrap 1 }
+
+xdcTrapAlarmGroup2StatusChange NOTIFICATION-TYPE
+   OBJECTS { xdcAlarmGroup2Status }
+   STATUS current
+   DESCRIPTION
+   "A xdcTrapAlarmGroup2StatusChange trap signifies that the value of the
+   Group 2 characters reported by the CLI alarmstat command has changed.  The 
+   current value is contained in the included xdcAlarmGroup2Status."
+   ::= { xdctrap 2 }
+
+xdcTrapAlarmGroup3StatusChange NOTIFICATION-TYPE
+   OBJECTS { xdcAlarmGroup3Status }
+   STATUS current
+   DESCRIPTION
+   "A xdcTrapAlarmGroup3StatusChange trap signifies that the value of the
+   Group 3 characters reported by the CLI alarmstat command has changed.  The 
+   current value is contained in the included xdcAlarmGroup3Status."
+   ::= { xdctrap 3 }
+
+xdcAlarmGroup1Status OBJECT-TYPE
+   SYNTAX DisplayString (SIZE(0..8))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Alarm Group 1 state as returned by the CLI alarmstat command. 
+   It is a string containing either 6 or 8 characters depending upon the
+   model.  A 0, 1 or x in each position indicates no-fault, fault or
+   not installed, respectively.  In order from left to right, a
+   1 character in the position indicates:
+
+   Signal Input A absent
+   Signal Input B absent
+   Disable A is asserted
+   Disable B is asserted
+   Power Supply A failed
+   Power Supply B failed (option, x character if not installed)
+   Selected Input Stuck High (PDC3301 only)
+   Input A & Input B Rate Mismatch (PDC3301 only)."
+   ::= { xdc 1 }
+
+xdcAlarmGroup2Status OBJECT-TYPE
+   SYNTAX DisplayString (SIZE(0..10))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Alarm Group 2 state as returned by the CLI alarmstat command. 
+   It is a string containing 10 characters.  A 0 or 1 in each position 
+   indicates no-fault or fault, respectively.  In order from left to right, a
+   1 character in the position indicates:
+
+   Signal Output  1 absent
+   Signal Output  2 absent
+   Signal Output  3 absent
+   Signal Output  4 absent
+   Signal Output  5 absent
+   Signal Output  6 absent
+   Signal Output  7 absent
+   Signal Output  8 absent
+   Signal Output  9 absent
+   Signal Output 10 absent."
+   ::= { xdc 2 }
+
+xdcAlarmGroup3Status OBJECT-TYPE
+   SYNTAX DisplayString (SIZE(0..4))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Alarm Group 3 state as returned by the CLI alarmstat command. 
+   It is a string containing 4 characters.  A 0, 1 or x in each position 
+   indicates no-fault, fault or not installed, respectively.  In order 
+   from left to right, a 1 character in the position indicates:
+
+   System Oscillator error
+   Non-volatile memory (FLASH) error
+   FPGA error
+   Network communication error (option)."
+   ::= { xdc 3 }
+
+xdcDisableMode OBJECT-TYPE
+   SYNTAX DisplayString (SIZE(0..7))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current DisableMode settings as returned by the CLI disablemode command.
+   It consists of three comma-separated sub-strings.  From left to right,
+   the first string is either Y or N to indicate whether the Disable A input
+   is to be used for input switching or to be ignored, respectively.  The 
+   second string is either Y or N to indicate whether the Disable B input is 
+   to be used for input switching or to be ignored, respectively.
+
+   The third string is either ON or OFF and is only meaningful if either of the
+   two Disable inputs are enabled for switching.  It indicates whether the 
+   secondary input, following a failure of the primary input, will be left ON 
+   or switched OFF if the secondary Disable input is subsequently asserted.
+   In some systems, it might be desirable to allow the secondary input to continue
+   to drive the downstream equipment rather than completely shut off the
+   signal."
+   ::= { xdc 4 }  
+
+xdcDisableAStat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      disableInactive  (0),
+      disableActive    (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Disable A input state as returned by the CLI disablestat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Disable A input is either in the inactive, low state or the active
+   high state.  Depending upon the DisableMode setting, the corresponding
+   Signal A input would be enabled or disabled accordingly based on this
+   value."
+   ::= { xdc 5 }  
+
+xdcDisableBStat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      disableInactive  (0),
+      disableActive    (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Disable B input state as returned by the CLI disablestat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Disable B input is either in the inactive, low state or the active
+   high state.  Depending upon the DisableMode setting, the corresponding
+   Signal B input would be enabled or disabled accordingly based on this
+   value."
+   ::= { xdc 6 }  
+
+xdcInpAlign OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      inpalignNA     (2147483647)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "The InpAlign value indicates the phase alignment in units of nanoseconds
+   between PDC3301e Inputs A and B.  Resolution is 65 nanoseconds.  Positive
+   values indicate that Input A is earlier than Input B.  If the value is
+   the largest positive 32-bit integer value (2147483647), it indicates that
+   the Input A and Input B rates differ by more than 10 PPM, or that the rate
+   is greater than 1 MPPS.  This corresponds to the N/A value returned by
+   the CLI inpalign command.
+
+   This value is only meaningful on the PDC3301e model.  It will be 0 for all
+   other models."
+   ::= { xdc 7 }
+
+xdcPwrAStat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      pwrAbsent  (0),
+      pwrPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Power A input state as returned by the CLI pwrstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Power A input is either absent or present, respectively."
+   ::= { xdc 8 }  
+
+xdcPwrBStat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      pwrNotInstalled  (-1),
+      pwrAbsent         (0),
+      pwrPresent        (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Power B input state as returned by the CLI pwrstat command.
+   It consists of an integer having value 0, 1 or -1  to indicate that
+   the Power B input is either absent, present or not installed, respectively."
+   ::= { xdc 9 }  
+
+xdcRateA OBJECT-TYPE
+   SYNTAX DisplayString (SIZE(0..16))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current pulse rate/sec of Input A as returned by the CLI ratea command.
+   It consists of a string representing a floating point value.  The
+   resolution is about 32 PPB of the rate.  
+
+   This value is only meaningful on the PDC3301e model.  It will be 0.0 
+   for all other models."
+   ::= { xdc 10 }  
+
+xdcRateB OBJECT-TYPE
+   SYNTAX DisplayString (SIZE(0..16))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current pulse rate/sec of Input B as returned by the CLI rateb command.
+   It consists of a string representing a floating point value.  The
+   resolution is about 32 PPB of the rate.  
+
+   This value is only meaningful on the PDC3301e model.  It will be 0.0 
+   for all other models."
+   ::= { xdc 11 }  
+
+xdcSelectedIn OBJECT-TYPE
+   SYNTAX DisplayString (SIZE(0..4))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Selected Input as returned by the CLI selectedin command.
+   It consists of a string that can be A, B or NONE."  
+   ::= { xdc 12 }  
+
+xdcSigInAStat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigInAbsent  (0),
+      sigInPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Input A signal state as returned by the CLI siginstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Input A signal is either absent or present, respectively."
+   ::= { xdc 13 }  
+
+xdcSigInBStat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigInAbsent  (0),
+      sigInPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Input B signal state as returned by the CLI siginstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Input B signal is either absent or present, respectively."
+   ::= { xdc 14 }  
+
+xdcSigOut1Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 1 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 1 signal is either absent or present, respectively."
+   ::= { xdc 15 }  
+
+xdcSigOut2Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 2 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 2 signal is either absent or present, respectively."
+   ::= { xdc 16 }  
+
+xdcSigOut3Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 3 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 3 signal is either absent or present, respectively."
+   ::= { xdc 17 }  
+
+xdcSigOut4Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 4 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 4 signal is either absent or present, respectively."
+   ::= { xdc 18 }  
+
+xdcSigOut5Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 5 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 5 signal is either absent or present, respectively."
+   ::= { xdc 19 }  
+
+xdcSigOut6Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 6 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 6 signal is either absent or present, respectively."
+   ::= { xdc 20 }  
+
+xdcSigOut7Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 7 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 7 signal is either absent or present, respectively."
+   ::= { xdc 21 }  
+
+xdcSigOut8Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 8 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 8 signal is either absent or present, respectively."
+   ::= { xdc 22 }  
+
+xdcSigOut9Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 9 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 9 signal is either absent or present, respectively."
+   ::= { xdc 23 }  
+
+xdcSigOut10Stat OBJECT-TYPE
+   SYNTAX INTEGER
+   {
+      sigOutAbsent  (0),
+      sigOutPresent (1)
+   }
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current Output 10 signal state as returned by the CLI sigoutstat command.
+   It consists of an integer having value 0 or 1 to indicate that
+   the Output 10 signal is either absent or present, respectively."
+   ::= { xdc 24 }  
+
+xdcSwitchMode OBJECT-TYPE
+   SYNTAX DisplayString (SIZE(0..2))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "Current input Switch Mode as returned by the CLI switchmode command.
+   It consists of a string that can be A, B, AB or BA.  It determines the
+   operation when an input fails due to signal absence or to assertion of
+   the Disable input.  Its behavior is also dependent upon the Disable Mode
+   settings."  
+   ::= { xdc 25 }  
+
+xdcVersion OBJECT-TYPE
+   SYNTAX DisplayString(SIZE(0..64))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "ASCII string showing the XDC330X subsystem firmware and FPGA versions."
+   ::= { xdc 26 }
+
+-- sys branch of the XDC330X subtree
+
+sysSerialNumber OBJECT-TYPE
+   SYNTAX DisplayString(SIZE(0..80))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This is an ASCII string showing the XDC330X serial number."
+   ::= { sys 1 }
+
+sysVersion OBJECT-TYPE
+   SYNTAX DisplayString(SIZE(0..80))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This is an ASCII string showing the Linux root file system firmware version."
+   ::= { sys 2 }
+
+sysKernelVersion OBJECT-TYPE
+   SYNTAX DisplayString(SIZE(0..80))
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This is an ASCII string showing the Linux kernel firmware version."
+   ::= { sys 3 }
+
+sysCPUFreeMemorykB OBJECT-TYPE
+   SYNTAX INTEGER
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This value is the Linux CPU Free Memory in kiloBytes."
+   ::= { sys 4 }
+
+sysCPULoadAveragePerCent OBJECT-TYPE
+   SYNTAX INTEGER
+   MAX-ACCESS read-only
+   STATUS current
+   DESCRIPTION
+   "This value is the Linux CPU Load Average as percent of total load."
+   ::= { sys 5 }
+
+END

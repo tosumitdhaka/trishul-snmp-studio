@@ -54,26 +54,25 @@
     <!-- RIGHT: Trap Browser -->
     <div class="col-lg-7">
         <div class="card shadow-sm h-100">
-            <div class="card-header d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center py-2">
                 <span><i class="fas fa-bell me-2 text-warning"></i> Available Traps</span>
                 <input type="text" class="form-control form-control-sm" id="trap-search" 
-                       placeholder="Search traps..." style="max-width: 250px;">
+                    placeholder="Search..." style="max-width: 200px;">
             </div>
             <div class="card-body p-0">
                 <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
-                    <table class="table table-sm table-hover mb-0">
+                    <table class="table table-sm table-hover mb-0" style="font-size: 0.85rem;">
                         <thead class="table-light sticky-top">
                             <tr>
-                                <th style="width: 30%;">Trap Name</th>
-                                <th style="width: 35%;">OID</th>
-                                <th style="width: 15%;">Module</th>
-                                <th style="width: 10%;">Objects</th>
-                                <th style="width: 10%;"></th>
+                                <th style="width: 40%;">Name</th>
+                                <th style="width: 20%;" class="text-center">Module</th>
+                                <th style="width: 15%;" class="text-center">Objects</th>
+                                <th style="width: 25%;" class="text-center">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="trap-table-body">
                             <tr>
-                                <td colspan="5" class="text-center text-muted p-3">Loading traps...</td>
+                                <td colspan="4" class="text-center text-muted p-3">Loading traps...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -81,6 +80,7 @@
             </div>
         </div>
     </div>
+
 </div>
 
 <!-- Upload Modal -->

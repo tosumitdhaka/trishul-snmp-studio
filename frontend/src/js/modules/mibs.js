@@ -3,6 +3,7 @@ window.MibsModule = {
     uploadModal: null,
     trapDetailsModal: null,
     allTraps: [],
+    currentStatus: null, // Track current status
 
     init: function() {
         this.uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
@@ -20,6 +21,8 @@ window.MibsModule = {
         try {
             const res = await fetch('/api/mibs/status');
             const data = await res.json();
+            
+            this.currentStatus = data; // Store current status
 
             document.getElementById('mib-count-loaded').textContent = data.loaded;
             document.getElementById('mib-count-failed').textContent = data.failed;
@@ -29,8 +32,13 @@ window.MibsModule = {
 
             this.renderMibList(data.mibs);
 
+            // Show/hide failed MIBs card based on actual errors
+            const failedCard = document.getElementById('failed-mibs-card');
             if (data.errors.length > 0) {
                 this.renderFailedMibs(data.errors);
+                failedCard.style.display = 'block';
+            } else {
+                failedCard.style.display = 'none';
             }
         } catch (e) {
             console.error('Failed to load MIB status', e);
@@ -49,7 +57,7 @@ window.MibsModule = {
             <li class="list-group-item d-flex justify-content-between align-items-center py-2">
                 <div class="flex-grow-1">
                     <div class="d-flex align-items-center">
-                        <i class="fas fa-book text-primary me-2"></i>
+                        <i class="fas fa-book text-success me-2"></i>
                         <strong>${mib.name}</strong>
                         <span class="badge bg-success ms-2">✓</span>
                     </div>
@@ -66,19 +74,26 @@ window.MibsModule = {
     },
 
     renderFailedMibs: function(errors) {
-        const card = document.getElementById('failed-mibs-card');
         const list = document.getElementById('failed-mib-list');
-
-        card.style.display = 'block';
 
         list.innerHTML = errors.map(mib => `
             <li class="list-group-item">
                 <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <strong class="text-danger">${mib.name}</strong>
-                        <div class="small text-muted mt-1">${mib.error || 'Unknown error'}</div>
+                    <div class="flex-grow-1">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-exclamation-circle text-danger me-2"></i>
+                            <strong class="text-danger">${mib.name}</strong>
+                        </div>
+                        <div class="small text-muted mt-1 font-monospace" style="max-width: 500px; overflow-wrap: break-word;">
+                            ${mib.error || 'Unknown error'}
+                        </div>
                         ${mib.status === 'missing_deps' ? `
-                            <div class="badge bg-warning text-dark mt-1">Missing dependencies</div>
+                            <div class="mt-2">
+                                <span class="badge bg-warning text-dark">Missing dependencies</span>
+                                <button class="btn btn-xs btn-outline-info ms-2" onclick="MibsModule.showDependencyHelp()">
+                                    <i class="fas fa-question-circle"></i> Help
+                                </button>
+                            </div>
                         ` : ''}
                     </div>
                     <button class="btn btn-sm btn-outline-danger" onclick="MibsModule.deleteMib('${mib.file}')">
@@ -88,7 +103,7 @@ window.MibsModule = {
             </li>
         `).join('');
     },
-
+	
     loadTraps: async function() {
         try {
             const res = await fetch('/api/mibs/traps');
@@ -103,31 +118,51 @@ window.MibsModule = {
 
     renderTraps: function(traps) {
         const tbody = document.getElementById('trap-table-body');
-
+    
         if (traps.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted p-3">No traps found</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted p-3">No traps found</td></tr>';
             return;
         }
-
+    
         tbody.innerHTML = traps.map(trap => `
             <tr>
                 <td>
-                    <strong>${trap.name}</strong>
-                    <div class="small text-muted">${trap.description.substring(0, 50)}${trap.description.length > 50 ? '...' : ''}</div>
+                    <div class="d-flex align-items-center">
+                        <i class="fas fa-bell text-warning me-2"></i>
+                        <strong>${trap.name}</strong>
+                    </div>
                 </td>
-                <td><code class="small">${trap.oid}</code></td>
-                <td><span class="badge bg-secondary">${trap.module}</span></td>
                 <td class="text-center">
-                    <span class="badge bg-info">${trap.objects.length}</span>
+                    <span class="badge bg-secondary" style="font-size: 0.7rem;">${trap.module}</span>
                 </td>
-                <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick='MibsModule.showTrapDetails(${JSON.stringify(trap).replace(/'/g, "&apos;")})'>
-                        <i class="fas fa-info-circle"></i>
-                    </button>
+                <td class="text-center">
+                    <span class="badge bg-info" style="font-size: 0.7rem;">${trap.objects.length}</span>
+                </td>
+                <td class="text-center">
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-outline-primary btn-sm py-0 px-2" 
+                                onclick='MibsModule.showTrapDetails(${JSON.stringify(trap).replace(/'/g, "&apos;")})' 
+                                title="View Details">
+                            <i class="fas fa-info-circle"></i>
+                        </button>
+                        <button class="btn btn-success btn-sm py-0 px-2" 
+                                onclick='MibsModule.useTrapDirectly(${JSON.stringify(trap).replace(/'/g, "&apos;")})' 
+                                title="Send Trap">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
                 </td>
             </tr>
         `).join('');
     },
+
+
+    // NEW: Send trap directly without modal
+    useTrapDirectly: function(trap) {
+        sessionStorage.setItem('selectedTrap', JSON.stringify(trap));
+        window.location.hash = '#traps';
+    },
+
 
     filterTraps: function(query) {
         if (!this.allTraps) return;
@@ -142,16 +177,29 @@ window.MibsModule = {
 
     showTrapDetails: function(trap) {
         this.currentTrapData = trap;
-
+    
         const title = document.getElementById('trap-detail-title');
         const body = document.getElementById('trap-detail-body');
-
+    
         title.textContent = trap.full_name;
-
+    
         body.innerHTML = `
             <div class="mb-3">
+                <label class="fw-bold">Name:</label>
+                <div><code>${trap.name}</code></div>
+            </div>
+            <div class="mb-3">
+                <label class="fw-bold">Full Name:</label>
+                <div><code>${trap.full_name}</code></div>
+            </div>
+            <div class="mb-3">
                 <label class="fw-bold">OID:</label>
-                <div><code>${trap.oid}</code></div>
+                <div>
+                    <code>${trap.oid}</code>
+                    <button class="btn btn-xs btn-outline-secondary ms-2" onclick="navigator.clipboard.writeText('${trap.oid}')">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
             </div>
             <div class="mb-3">
                 <label class="fw-bold">Module:</label>
@@ -159,23 +207,26 @@ window.MibsModule = {
             </div>
             <div class="mb-3">
                 <label class="fw-bold">Description:</label>
-                <div class="text-muted">${trap.description}</div>
+                <div class="text-muted">${trap.description || 'No description available'}</div>
             </div>
             <div class="mb-3">
                 <label class="fw-bold">Associated Objects (VarBinds):</label>
                 ${trap.objects.length > 0 ? `
                     <ul class="list-group mt-2">
                         ${trap.objects.map(obj => `
-                            <li class="list-group-item d-flex justify-content-between">
-                                <span><code>${obj.name}</code></span>
-                                <span class="text-muted small">${obj.oid}</span>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                <div>
+                                    <code>${obj.name}</code>
+                                    <div class="small text-muted">${obj.full_name}</div>
+                                </div>
+                                <code class="text-muted small">${obj.oid}</code>
                             </li>
                         `).join('')}
                     </ul>
                 ` : '<div class="text-muted">No associated objects defined</div>'}
             </div>
         `;
-
+    
         this.trapDetailsModal.show();
     },
 
@@ -380,7 +431,13 @@ window.MibsModule = {
         }
     },
 
+
     reloadMibs: async function() {
+        const btn = event.target;
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        btn.disabled = true;
+
         try {
             const res = await fetch('/api/mibs/reload', { method: 'POST' });
             const data = await res.json();
@@ -388,12 +445,34 @@ window.MibsModule = {
             await this.loadStatus();
             await this.loadTraps();
 
+            // Show success notification
+            this.showNotification(`Reloaded: ${data.loaded} loaded, ${data.failed} failed`, 'success');
+            
             console.log('MIBs reloaded:', data);
         } catch (e) {
             console.error('Reload failed', e);
+            this.showNotification('Reload failed: ' + e.message, 'error');
+        } finally {
+            btn.innerHTML = originalHtml;
+            btn.disabled = false;
         }
     },
 
+    showNotification: function(message, type = 'info') {
+        const banner = document.createElement('div');
+        banner.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+        banner.style.cssText = 'top: 80px; right: 20px; z-index: 9999; min-width: 300px;';
+        banner.innerHTML = `
+            ${message}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(banner);
+        
+        setTimeout(() => {
+            banner.remove();
+        }, 4000);
+    },
+	
     deleteMib: async function(filename) {
         if (!confirm(`Delete ${filename}?`)) return;
 
@@ -416,4 +495,5 @@ window.MibsModule = {
             '- Vendor MIBs: Check manufacturer support pages'
         );
     }
+
 };

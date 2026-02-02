@@ -31,12 +31,16 @@ window.SimulatorModule = {
         }
     },
 
+    // FIX: Updated API path
     loadCustomData: async function() {
         const editor = document.getElementById('custom-data-editor');
         if (!editor) return;
 
         try {
-            const res = await fetch('/api/files/data');
+            const res = await fetch('/api/simulator/data');
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
             const data = await res.json();
             editor.value = JSON.stringify(data, null, 2);
         } catch (e) {
@@ -45,23 +49,32 @@ window.SimulatorModule = {
         }
     },
 
+    // FIX: Updated API path and response handling
     saveCustomData: async function() {
         const editor = document.getElementById('custom-data-editor');
         const content = editor.value;
 
         try {
+            // Validate JSON
             const json = JSON.parse(content);
 
-            const res = await fetch('/api/files/data', {
+            // Save
+            const res = await fetch('/api/simulator/data', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(json)
             });
 
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
             const data = await res.json();
 
+            // Log success
             this.log(`<span class="text-success">Custom data saved: ${data.message}</span>`);
             
+            // Show notification
             const banner = document.createElement('div');
             banner.className = 'alert alert-success alert-dismissible fade show position-fixed';
             banner.style.cssText = 'top: 80px; right: 20px; z-index: 9999;';
@@ -73,7 +86,8 @@ window.SimulatorModule = {
             setTimeout(() => banner.remove(), 3000);
 
         } catch (e) {
-            alert('Invalid JSON format!\n\n' + e.message);
+            console.error('Save error:', e);
+            alert('Failed to save custom data:\n\n' + e.message);
         }
     },
 
@@ -158,18 +172,40 @@ window.SimulatorModule = {
         btnRestart.disabled = !isRunning;
     },
 
-    log: function(msg) {
+    log: function(msg, type = 'info') {
         const area = document.getElementById("sim-log-area");
         const time = new Date().toLocaleTimeString();
-        const html = `<div class="border-bottom py-1 px-2"><span class="text-muted small">[${time}]</span> ${msg}</div>`;
+        
+        let icon = 'fa-info-circle';
+        let color = 'text-muted';
+        
+        if (type === 'success') {
+            icon = 'fa-check-circle';
+            color = 'text-success';
+        } else if (type === 'error') {
+            icon = 'fa-exclamation-circle';
+            color = 'text-danger';
+        } else if (type === 'warning') {
+            icon = 'fa-exclamation-triangle';
+            color = 'text-warning';
+        }
+        
+        const html = `
+            <div class="border-bottom py-2 px-2">
+                <span class="text-muted small">[${time}]</span>
+                <i class="fas ${icon} ${color} ms-2"></i>
+                <span class="ms-2">${msg}</span>
+            </div>
+        `;
         
         window.AppState.logs.push(html);
-        if (window.AppState.logs.length > 50) window.AppState.logs.shift();
+        if (window.AppState.logs.length > 100) window.AppState.logs.shift();
 
         if(area) {
             if(area.textContent.includes("Waiting for events")) area.innerHTML = "";
             area.innerHTML += html;
             area.scrollTop = area.scrollHeight;
         }
-    }
+    },
+
 };
