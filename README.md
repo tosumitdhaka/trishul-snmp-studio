@@ -1,4 +1,55 @@
-# 🔱 Trishul SNMP
+# 🔱 Trishul-SNMP
+
+**Replace 5+ SNMP tools with one modern platform**
+
+- ✅ **Net-SNMP (CLI)** → Web UI
+- ✅ **snmpsim** → Custom OID simulator
+- ✅ **iReasoning ($500)** → Free MIB browser
+- ✅ **snmptrapd** → Real-time trap receiver
+- ✅ **Custom scripts** → JSON/CSV export
+
+**One container. Zero cost. Full control.**
+
+---
+
+## 🎯 What Trishul-SNMP Replaces
+
+✅ All Net-SNMP CLI tools (for testing)  
+✅ Paid MIB browsers (iReasoning, MG-SOFT)  
+✅ SNMP simulators (snmpsim, snmpsimd)  
+✅ Trap receivers (snmptrapd + log parsing)  
+✅ Multiple scattered tools → One unified platform
+
+---
+
+## 👥 Best For
+
+- 🔧 Network engineers testing devices
+- 🚀 DevOps testing SNMP integrations
+- 📚 Students learning SNMP
+- ✅ QA teams validating implementations
+- 👥 Small teams needing trap monitoring
+
+---
+
+## ⚠️ Not For
+
+- ❌ Production 24/7 monitoring (use Zabbix, PRTG)
+- ❌ Enterprise-scale NMS (use SolarWinds, Cisco Prime)
+
+---
+
+## 🚀 Quick Start
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tosumitdhaka/trishul-snmp/main/install-trishul-snmp.sh | bash
+```
+
+Access: http://localhost:8080(opens in a new tab)
+Default login: admin / admin123
+
+---
+
 
 **Professional SNMP Utilities**
 
