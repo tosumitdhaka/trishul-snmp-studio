@@ -5,3 +5,8 @@ backend/data*
 __pycache__/
 *.pyc
 .pytest_cache/
+frontend/dist/
+frontend/node_modules/
+.coverage
+docs/archive/research/release-comparison-*.json
+docs/archive/research/release-comparison-*.md

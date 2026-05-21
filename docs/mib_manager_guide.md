@@ -1,94 +1,144 @@
 # MIB Manager Guide
 
-The MIB Manager is the operational home for loading, validating, reloading, and cleaning up MIB files.
+The current `2.0.0` release UI keeps `MIB Manager` as the main page for loading
+and maintaining MIB files.
 
-## What It Covers
+## What The Page Covers
 
-- MIB upload
-- automatic validation on file selection
-- dependency detection
-- optional trusted-source dependency fetch
-- reload behavior
-- MIB library overview
-- trap library overview
+`MIB Manager` is the place to:
 
-## Supported File Types
+- review loaded and failed MIB files
+- validate a batch before upload
+- upload and reload MIBs
+- fetch missing dependencies from approved remote sources
+- export the active catalog by scope and type
+- inspect the current trap catalog exposed by loaded MIBs
+- delete uploaded MIB files
 
-- `.mib`
-- `.txt`
-- `.my`
+## Upload Workflow
 
-## Validation Behavior
+Use the upload modal for the normal flow:
 
-Validation runs automatically when files are selected in the upload modal.
+1. choose one or more MIB files
+2. let validation complete
+3. review file status, imports, and missing dependencies
+4. upload and reload
 
-Important rules:
+Validation is read-only. It does not change the live runtime until you upload.
 
-- validation is read-only
-- validation never fetches remote dependencies
-- uploaded filenames are sanitized before save
+## Dependency Fetch
 
-If validation fails, review the detailed error text before uploading.
+If validation reports missing imports:
 
-## Dependency Handling
+1. review the missing dependency list
+2. use the dependency fetch action if approved sources are configured
+3. if your deployment enables auto-fetch in `Settings`, upload or reload can try those sources automatically
+4. re-run validation or reload after dependencies are available
 
-When dependencies are missing, the UI can show:
+If remote fetch is not configured for your deployment, upload the missing MIBs
+manually first.
 
-- per-file missing dependencies
-- a global missing dependency list
-- a manual fetch action
+Validation stays read-only. Remote fetch happens only through the explicit fetch
+action or during upload or reload when auto-fetch is enabled.
 
-Remote fetch is restricted to the approved source list from Settings.
+## Loaded And Failed MIB Lists
 
-Auto-fetch is:
-
-- off by default
-- optional
-- only used during upload or reload when enabled
-
-## Upload And Reload
-
-After a successful upload:
-
-- files are saved into the MIB data directory
-- the MIB service reloads
-- simulator and trap receiver are restarted if they were already running
-- counts and trap availability are refreshed
-
-## MIB Library
-
-The left-side library shows:
+The status section shows:
 
 - loaded MIB count
 - failed MIB count
-- trap count
-- loaded module details
-- delete actions for saved MIB files
+- trap count inferred from loaded modules
+- per-file errors for failed MIBs
 
-Failed MIBs are listed separately with their error details.
+Use this section after every upload or reload so you do not assume a file was
+accepted just because the HTTP request succeeded.
 
-## Trap Library
+## Aggregate Bundle Resolution
 
-The right-side trap library provides:
+The live runtime uses one active aggregate bundle built from the managed upload
+area plus the bundled starter MIBs.
 
-- a consolidated list of available notifications
-- search
-- trap details
-- direct jump into Trap Sender
+Important rules:
 
-Built-in system traps are clearly marked when they come from bundled system MIBs rather than user-uploaded files.
+- `common/` is a normal source group, not the aggregate bundle itself
+- vendor groups such as `juniper/` or `ericsson/` stay separate on disk
+- duplicate module names may exist in storage across source groups
+- only one source copy is active in the aggregate bundle at a time
 
-## Recommended Usage Pattern
+Current source precedence is:
 
-1. Upload the MIB file.
-2. Review validation results.
-3. Resolve or fetch missing dependencies.
-4. Upload and reload.
-5. Check the trap library and MIB Browser for the newly loaded content.
+1. files stored directly under the upload root if any exist
+2. `common/`
+3. other explicit source groups such as `juniper/` or `ericsson/`
+4. `auto-fetched/`
+5. bundled starter MIBs
+
+That means:
+
+- a manual copy in `common/` overrides the same module stored in a vendor group
+- an explicit vendor upload overrides the same module if it only exists in `auto-fetched/`
+- bundled MIBs are fallback sources, not the preferred active copy when a managed upload exists
+
+If the same module exists in more than one managed source group, the non-active
+copies are shown as `shadowed` in `MIB Manager`.
+
+## Upload And Duplicate Behavior
+
+Validation now reports when an uploaded file would be shadowed by an existing
+higher-precedence source.
+
+Typical examples:
+
+- upload `JUNIPER-MAG-MIB` into `juniper/` while `common/JUNIPER-MAG-MIB.mib` already exists:
+  the `common/` copy stays active and the new vendor copy is stored as shadowed
+- upload a vendor MIB while only an `auto-fetched/` copy exists:
+  the vendor copy becomes active after upload or reload
+
+Source-group exports use the active aggregate result, not every stored duplicate
+copy. If a module is currently active from `common/`, exporting `juniper` will
+not include it until the active source changes.
+
+## Trap Catalog
+
+The lower section of `MIB Manager` exposes the trap catalog built from the
+currently loaded MIBs.
+
+Use it to:
+
+- confirm a trap symbol exists
+- inspect its numeric OID
+- review associated objects
+- jump directly into the `Traps` sender
+
+The page also exposes scoped catalog export actions so you can export the active
+catalog or notification-focused slices in JSON or CSV.
+
+## Delete And Reload
+
+Deleting a MIB file removes it from the managed upload area and then
+reloads the remaining set.
+
+Use delete when:
+
+- one uploaded file is stale or incorrect
+- a dependency chain changed
+- you want to verify a smaller catalog set
+
+If you delete the active copy of a module and another stored duplicate still
+exists, reload promotes the next highest-precedence copy automatically. If the
+rebuild fails, the deleted file is restored.
+
+## Common Failure Patterns
+
+Check these first if MIB workflows look wrong:
+
+- unsupported file extension
+- missing dependencies that were not uploaded or fetched
+- a reload finished with partial failures
+- the symbol you want is in a file that did not load successfully
 
 ## Related Docs
 
 - [MIB Browser Guide](mib_browser_guide.md)
-- [Trap Manager Guide](trap_manager_guide.md)
-- [API Reference](api_reference.md)
+- [Traps Guide](trap_manager_guide.md)
 - [Troubleshooting](troubleshooting.md)

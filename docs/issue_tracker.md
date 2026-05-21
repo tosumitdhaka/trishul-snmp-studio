@@ -1,52 +1,54 @@
 # Issue Tracker
 
-This document is the repo-level backlog for bugs, gaps, improvements, and feature scope. Use the IDs below in pull requests, release notes, and roadmap updates.
+This file is the current release tracker.
 
-## Priority Guide
+The temporary `2.0.0` implementation planning document was removed from the
+active repo tree during the release cleanup. This page is the short status
+board used in PRs, release notes, and roadmap updates.
 
-- `P0`: security issue or release blocker
-- `P1`: high-priority reliability or platform work
-- `P2`: important but non-blocking follow-up
-- `P3`: longer-term backlog
+## Active Release IDs
 
-## Bugs & Risks
+Use implementation slice IDs for release-bound work: `S0` to `S13`.
 
-- `BUG-001` `P0` `Done` Harden `/api/mibs/validate-batch` temp-file handling so uploaded filenames cannot escape the validation directory.
-- `BUG-002` `P0` `Done` Remove stored XSS paths caused by rendering trap payloads and MIB metadata with `innerHTML` in frontend modules.
-- `BUG-003` `P0` `Done` Enforce logout and session timeout on active WebSocket connections, not only during initial handshake.
-- `BUG-004` `P1` `Done` Make `stats.json` updates reliable under concurrent API and worker writes; remove lost counter increments.
-- `BUG-005` `P1` `Done` Verify simulator and trap receiver startup before returning `started`, so port-bind failures do not look healthy.
-- `BUG-006` `P1` `Done` Remove or gate hardcoded `linux/arm64` platform pins in `docker-compose.yml` so amd64 hosts work cleanly.
-- `BUG-007` `P1` `Done` Apply the saved UI theme before first paint so auth and app shells do not flash light mode on startup.
-- `BUG-008` `P1` `Done` Remove hardcoded light or dark utility classes and inline colors that leave pages visually mixed after theme changes.
-- `BUG-009` `P2` `Done` Fix dark-mode rendering for sticky table headers, modal surfaces, code blocks, and log or result panes.
+Use `POST-200-*` IDs for explicitly deferred work beyond `2.0.0`.
 
-## Gaps
+Use `POST-210-*` IDs for planned `2.1.0` backend/frontend parity work.
 
-- `GAP-001` `P1` `Done` Add automated smoke tests for login, simulator lifecycle, trap send/receive, walk execution, and MIB upload flows.
-- `GAP-002` `P2` `Done` Add a repo-local developer setup path for backend and frontend work without relying only on published container images or wiki pages.
-- `GAP-003` `P2` `Done` Document the release workflow: version bump points, changelog updates, image publishing, and verification steps.
-- `GAP-004` `P2` `Done` Add a repeatable UI verification checklist covering light and dark mode plus desktop and mobile review for the core pages.
+## 2.0.0 Slice Status
 
-## Improvements
+- `S0` `Done` Create the `2.0.0` repo skeleton with the new backend package, Alembic, and release-gate entrypoint.
+- `S1` `Done` Create the SQLite base schema for settings, bundles, compile runs, and foundational persistence.
+- `S2` `Done` Implement bundle storage, activation, and rollback-safe switching.
+- `S3` `Done` Implement catalog resolve and search services on the bundle-first model.
+- `S4` `Done` Implement the in-process SNMP runtime for responder, manager, and notifications.
+- `S5` `Done` Implement durable notification history and related persistence services.
+- `S6` `Done` Build the authenticated shell foundation and restore the current operator UI on the new backend platform.
+- `S7` `Done` Implement MIB upload, compile, source group management, and the operator-facing MIB pages.
+- `S8` `Done` Implement simulator, walk, and runtime services with the corresponding operator pages.
+- `S9` `Done` Implement trap listener, send, and notification services with the traps page.
+- `S10` `Done` Implement dashboard, settings, and stats services.
+- `S11` `Done` Remove legacy runtime dependencies. Eliminate subprocess-based simulator and trap workers; all SNMP runs in-process.
+- `S12` `Done` Rewrite operator and platform documentation for the `2.0.0` runtime.
+- `S13` `Done` Backend shell consolidation: eliminated the operator-shell bridge and catalog DB tables; all routes call flat services directly; all tests call services directly with no bridge intermediary.
 
-- `IMPR-001` `P1` `Done` Centralize frontend escaping and DOM-render helpers to reduce repeated manual HTML construction.
-- `IMPR-002` `P2` `Done` Keep non-root project docs under `docs/` and reduce duplicated planning content in `README.md`.
-- `IMPR-003` `P2` `Done` Map tracker IDs to GitHub labels, milestones, and PR templates so backlog state is easier to manage.
-- `IMPR-004` `P2` `Done` Normalize buttons, iconography, badges, and status treatments so the UI reads as one consistent product surface.
-- `IMPR-005` `P2` `Done` Improve the auth shell and global chrome for responsive layout, theme-toggle accessibility, and clearer visual hierarchy.
+## Deferred Beyond 2.0.0
 
-## Feature Scope
+- `POST-200-001` `Backlog` Add SNMPv3 runtime and UI parity.
+- `POST-200-002` `Backlog` Add writable `SET` responder behavior.
+- `POST-200-003` `Backlog` Add bundle import and export workflows.
+- `POST-200-004` `Backlog` Add one-click ecosystem demo flows.
+- `POST-200-005` `Backlog` Add distributed polling or orchestration features.
 
-- `FEAT-001` `P1` `Done` Auto-fetch missing MIB dependencies from trusted sources with opt-in controls and caching.
-- `FEAT-002` `P1` `Deferred beyond 1.4.1` Add SNMPv3 authentication and privacy support.
-- `FEAT-003` `P2` `Done` Export MIB tree and search results to JSON and CSV.
-- `FEAT-004` `P2` `Backlog` Add scheduled SNMP walks and saved jobs.
-- `FEAT-005` `P3` `Backlog` Add device or agent inventory plus reusable connection profiles.
-- `FEAT-006` `P3` `Backlog` Add multi-language UI support.
+## Planned 2.1.0 Follow-Up
+
+- `POST-210-001` `Backlog` Surface bundle list, detail, activate, rollback, and diff in the MIB Manager flow.
+- `POST-210-002` `Backlog` Add saved connection and simulator profiles to the operator pages.
+- `POST-210-003` `Backlog` Add notification history drill-down and replay to the Traps page.
+- `POST-210-004` `Backlog` Add direct runtime manager tools: GET, GETNEXT, GETBULK, inform send, and payload decode.
+- `POST-210-005` `Backlog` Expose richer system overview and diagnostics in the UI.
 
 ## Working Rules
 
-- Update this tracker before changing roadmap references.
-- Keep the stable ID in any matching GitHub issue title or body.
-- Mark an item done only after code, docs, and verification land together.
+- use the tracker ID in any matching issue title, PR title, or changelog note
+- update this tracker before changing [roadmap.md](roadmap.md)
+- do not mark a slice `Done` until code, docs, and verification all landed together

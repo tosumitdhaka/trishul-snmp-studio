@@ -1,46 +1,75 @@
 # Documentation
 
-This directory is the canonical documentation home for Trishul SNMP Suite.
-The GitHub wiki is being retired in favor of versioned docs that live in the repo with the code.
+This directory is the canonical documentation set for Trishul SNMP Suite `2.0.0`.
+The shipped operator surface is the restored page-based shell in `frontend/`:
+`Dashboard`, `Simulator`, `Walk & Parse`, `Traps`, `MIB Browser`,
+`MIB Manager`, and `Settings`.
 
 ## Start Here
 
 - [Installation Guide](installation_guide.md)
 - [First Steps](first_steps.md)
+- [Workspaces](workspaces.md)
 - [FAQ](faq.md)
 
-## Feature Guides
-
-- [SNMP Simulator Guide](snmp_simulator_guide.md)
-- [Walker Guide](walker_guide.md)
-- [Trap Manager Guide](trap_manager_guide.md)
-- [MIB Manager Guide](mib_manager_guide.md)
-- [MIB Browser Guide](mib_browser_guide.md)
-
-## Reference
+## Operator And Platform Reference
 
 - [Architecture Overview](architecture_overview.md)
 - [API Reference](api_reference.md)
 - [Troubleshooting](troubleshooting.md)
+- [Migration To Trishul SNMP Suite 2.0.0](migration_to_trishul_snmp_suite.md)
 
-## Project and Operations Docs
+`Migration To Trishul SNMP Suite 2.0.0` and `Changelog` intentionally contain
+historical `1.x` references. They are still current docs, but not steady-state
+operator guidance.
+
+The temporary `2.0.0` planning and document-review notes were removed from the
+active repo tree during the release cleanup. Use
+[Architecture Overview](architecture_overview.md), [Roadmap](roadmap.md), and
+[Issue Tracker](issue_tracker.md) for the maintained architecture and release
+status references.
+
+## Operator Guides
+
+These topic guides describe the current `2.0.0` release UI.
+
+- [MIB Manager Guide](mib_manager_guide.md)
+- [MIB Browser Guide](mib_browser_guide.md)
+- [Simulator Guide](snmp_simulator_guide.md)
+- [Walk & Parse Guide](walker_guide.md)
+- [Traps Guide](trap_manager_guide.md)
+
+## Development And Release
 
 - [Development Setup](development_setup.md)
-- [Migration To Trishul SNMP Suite](migration_to_trishul_snmp_suite.md)
 - [Release Process](release_process.md)
 - [Changelog](changelog.md)
 - [Roadmap](roadmap.md)
 - [Issue Tracker](issue_tracker.md)
 - [GitHub Workflow](github_workflow.md)
 
-## Common Workflows
+## 2.0 Planning And Design
 
-1. Install the application with the published image or a local build.
-2. Log in with the default credentials and change them in Settings.
-3. Start the simulator and load sample custom OID values.
-4. Run a walk against `127.0.0.1:1061`.
-5. Start the trap receiver and send a test trap to `127.0.0.1:1162`.
-6. Upload a custom MIB, review missing dependencies, and reload.
-7. Explore objects and notifications in the MIB Browser.
+These are historical planning artifacts for the `2.0.0` delivery path, not the
+operator source of truth for the shipped UI.
 
-If you are upgrading from the old split frontend/backend runtime, read [Migration To Trishul SNMP Suite](migration_to_trishul_snmp_suite.md) before changing deployment commands.
+The temporary planning workspace was removed from the active repo tree after
+the `2.0.0` cleanup. Use [Architecture Overview](architecture_overview.md),
+[Roadmap](roadmap.md), [Issue Tracker](issue_tracker.md), and
+[Changelog](changelog.md) for the maintained release record.
+
+## 2.1 Follow-Up Planning
+
+`2.1.0` follow-up planning is tracked directly in [Roadmap](roadmap.md) and
+[Issue Tracker](issue_tracker.md). No separate follow-up planning directory is
+kept in the live docs tree.
+
+## Common 2.0 Flow
+
+1. Install the suite with the published image or a local build.
+2. Log in with `admin` / `admin123` and rotate credentials in `Settings`.
+3. Load or verify MIBs in `MIB Manager`.
+4. Use `MIB Browser` to inspect symbols and jump into other pages.
+5. Use `Simulator` and `Walk & Parse` for local responder validation.
+6. Use `Traps` for listener and trap-send testing.
+7. Use `Dashboard` and `Settings` for health, stats, and metadata.

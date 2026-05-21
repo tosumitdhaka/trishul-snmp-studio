@@ -1,117 +1,118 @@
 # Development Setup
 
-This repo supports two development paths for `1.4.0` and later:
+This repo targets the `2.0.0` runtime built from:
 
-- Docker-first full-stack development using the merged single-image runtime.
-- Native backend development for faster router, service, and test iteration.
+- `backend/app` — FastAPI application with flat service architecture
+- `frontend/` — static operator shell built into `frontend/dist`
+- SQLite-backed product state via Alembic
+- compiled bundle artifacts via `trishul-smi`
+- in-process SNMP runtime via `trishul-snmp`
 
 ## Prerequisites
 
-- Docker with Compose v2 for container-based workflows.
-- Python 3.10 or newer for native backend work.
-- Net-SNMP CLI tools on the host for native backend work.
-  The backend shells out to `snmpwalk`, so install the usual Net-SNMP package set before using the native path.
+- Docker for containerized verification
+- Python `3.12` or newer for native backend work
+- Node `20` or newer for frontend builds
 
-## Docker Full Stack
+Net-SNMP CLI tools are not required. The `2.0.0` runtime uses an in-process
+SNMP stack.
 
-Use this path when you need the browser UI, `/api`, `/api/ws`, and `/docs` exactly as users see them in the merged runtime.
+## Recommended Daily Workflow
 
-```bash
-docker compose up -d
-docker compose logs -f app
-```
+1. Use the repo-root virtual environment for backend work.
+2. Rebuild `frontend/dist` after frontend changes.
+3. Run the test suite before merging runtime, API, or packaging changes.
 
-Endpoints:
+## Local Full Stack With The Installer
 
-- App UI: `http://localhost:8080`
-- API docs: `http://localhost:8080/docs`
-- Default login: `admin` / `admin123`
-
-Stop the stack with:
-
-```bash
-docker compose down
-```
-
-## Docker Full Stack From Local Source
-
-The checked-in `docker-compose.yml` uses the published image by default. For repo-local changes, add a local override file so Compose builds from this checkout instead.
-
-Create `docker-compose.override.yml` in the repo root:
-
-```yaml
-services:
-  app:
-    build: .
-    image: trishul-snmp-suite-local
-```
-
-Then run:
-
-```bash
-docker compose up --build
-```
-
-Use this mode for:
-
-- Frontend HTML, CSS, or JavaScript changes.
-- End-to-end verification of upload, trap, browser, and WebSocket flows.
-- Release-facing deployment or packaging changes.
-
-## One-Shot Local Deploy Script
-
-The canonical deployment script for `1.4.1` is:
+Closest path to the shipped runtime:
 
 ```bash
 ./install-trishul-snmp-suite.sh up-local
 ```
 
-Useful variants:
+Useful companion commands:
 
 ```bash
 ./install-trishul-snmp-suite.sh build-local
 ./install-trishul-snmp-suite.sh restart-local
-TRISHUL_IMAGE_SOURCE=local ./install-trishul-snmp-suite.sh up
-APP_PORT=8980 ./install-trishul-snmp-suite.sh up-local
-FRONTEND_PORT=8980 BACKEND_PORT=8900 ./install-trishul-snmp-suite.sh up-local
+./install-trishul-snmp-suite.sh logs
+./install-trishul-snmp-suite.sh status
+./install-trishul-snmp-suite.sh down
 ```
 
-Compatibility notes:
+Use this path for:
 
-- `install-trishul-snmp.sh` remains as a wrapper to the new script.
-- `FRONTEND_PORT` is treated as a legacy alias for `APP_PORT`.
-- `BACKEND_PORT` is optional and maps a second host port to the same merged app for transition compatibility.
-- Old containers and the old `trishul-snmp-data` volume are migrated automatically when possible.
+- Dockerfile or packaging changes
+- end-to-end page-flow verification
+- release-candidate validation
 
 ## Native Backend Loop
 
-Use this path when you are iterating on backend code and do not need the full containerized runtime on every change.
+From the repo root:
 
 ```bash
-cd backend
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+pip install -r backend/requirements-dev.txt
+cd frontend && npm ci && npm run build && cd ..
+uvicorn app.main:app --app-dir backend --reload --host 0.0.0.0 --port 8000
 ```
+
+Then open:
+
+- app UI: `http://localhost:8000`
+- OpenAPI docs: `http://localhost:8000/docs`
 
 Notes:
 
-- Tests are scoped by `pytest.ini` to `backend/tests`.
-- Runtime data stays under `backend/data/`.
-- Most config defaults are already in `backend/core/config.py`.
-- The backend now serves the static UI directly from `frontend/src`, so a native backend run can serve the application shell without Nginx.
+- runtime data stays under `backend/data/` unless you set `TRISHUL_DATA_DIR`
+- the backend serves `frontend/dist`, not raw frontend source files
+- if `frontend/dist` is missing, the backend shows a placeholder page
 
-Useful commands:
+## Frontend Iteration
+
+After frontend edits, rebuild:
 
 ```bash
-cd backend
-python3 -m pytest
-python3 -m compileall .
+cd frontend
+npm ci
+npm run build
 ```
 
-## Recommended Workflow
+`frontend/` is a static shell build with no dev server.
 
-1. Use the native backend loop for API, worker, and test changes.
-2. Use the Docker full stack or the one-shot local deploy script before merging any UI, deployment, or release-facing change.
-3. Keep tracker IDs and release notes aligned using [github_workflow.md](github_workflow.md) and [release_process.md](release_process.md).
+## Running Tests
+
+From the repo root:
+
+```bash
+.venv/bin/python -m pytest backend/ -q
+```
+
+Current test layout:
+
+- `backend/tests/unit/` — unit tests for app modules, scripts, and services
+- `backend/tests/contract/` — API and WebSocket contract coverage
+- `backend/tests/integration/` — lifespan, schema, and migration workflows
+- `backend/tests/live/` — live UDP runtime tests gated by `TRISHUL_ENABLE_LIVE_SNMP_RUNTIME=1`
+
+Expected result: backend tests pass; the live UDP tests are skipped unless
+`TRISHUL_ENABLE_LIVE_SNMP_RUNTIME=1` is set.
+
+To run live tests:
+
+```bash
+TRISHUL_ENABLE_LIVE_SNMP_RUNTIME=1 .venv/bin/python -m pytest backend/tests/live -v
+```
+
+## Compose Path
+
+`docker compose up -d` exists as a convenience path, but the canonical operator
+and release workflow is `install-trishul-snmp-suite.sh`.
+
+## Related Docs
+
+- [Installation Guide](installation_guide.md)
+- [Release Process](release_process.md)
+- [Architecture Overview](architecture_overview.md)

@@ -1,81 +1,74 @@
-# Walker Guide
+# Walk & Parse Guide
 
-The walker is the quickest way to test SNMP reachability, inspect OID data, and export structured results.
+The current release page is `Walk & Parse`.
 
-## Inputs
+## What The Page Supports
 
-The left panel controls:
+Use `Walk & Parse` to:
+
+- run an SNMP walk against a target
+- switch between text and JSON-oriented output modes
+- filter the current result set
+- copy or export results
+- jump into `MIB Browser` when you need more context
+
+## Standard Inputs
+
+The main fields are:
 
 - target host
-- UDP port
-- community string
+- port
+- community
 - root OID
-- `Parse to JSON`
+- `JSON Output`
+- `Resolve OIDs`
+- `Grouped JSON`
 
-The UI also lets you jump in from the MIB Browser so the OID field is pre-filled.
+Use numeric roots when you want the most robust path. Use symbolic roots when
+the relevant MIBs are loaded and you want readable output.
 
-## Common Targets
+Current output controls:
 
-Local simulator:
+- `JSON Output` returns structured JSON-oriented output instead of plain text
+- `Resolve OIDs` keeps symbolic resolution enabled when the active MIB set can resolve the walked objects
+- `Grouped JSON` returns the nested grouped JSON layout and keeps OID resolution enabled
 
-- Host: `127.0.0.1`
-- Port: `1061`
-- Community: `public`
+## Local Loopback Example
 
-Useful starting OIDs:
+If you started the local simulator on the default port, use:
 
-- `IF-MIB::ifTable`
-- `SNMPv2-MIB::sysDescr.0`
-- `1.3.6.1.2.1.1`
+- host: `127.0.0.1`
+- port: `1061`
+- community: `public`
+- root: `1.3.6.1.2.1.1`
 
-## Output Modes
+Run the walk and confirm:
 
-The backend can return different result modes depending on the request and the output format:
+- the request succeeds
+- the item count matches the expected subtree
+- resolved output reflects the values provided by the simulator
 
-- parsed JSON data
-- raw lines
-- label-only lines when the output is informative but not parseable into `OID = value` pairs
+## Result Handling
 
-In the UI, the goal is the same: show the result set clearly, keep it searchable, and allow export.
+After a successful walk, you can:
 
-## Result Panel
+- search within the current results
+- copy the current output
+- export JSON or CSV when the data shape allows it
+- jump into `MIB Browser` for related symbol inspection
 
-The right panel supports:
+## Common Failure Patterns
 
-- searching within the current result
-- clearing the current result
-- copying output
-- exporting output
+Check these first if a walk fails:
 
-The panel is scrollable and intended to stay within the page layout rather than expanding the whole page.
-
-## Walk History
-
-The left-side history stores recent walks locally in the browser.
-
-You can:
-
-- reload a previous target or OID quickly
-- delete an individual history item
-- clear the full walk history
-
-## Recommended Flow
-
-1. Start the simulator or identify a reachable SNMP device.
-2. Enter the host, port, community, and OID.
-3. Leave `Parse to JSON` enabled for normal use.
-4. Run the walk.
-5. Search or export the result.
-
-## Tips
-
-- Use symbolic OIDs when you want readable starting points.
-- Use numeric OIDs when you want strict reproducibility.
-- If a walk returns less than expected, verify both the root OID and the loaded MIB set.
+- wrong host or host-facing UDP port
+- wrong community string
+- unreachable target
+- invalid root OID format
+- symbolic root that is not resolvable in the current MIB set
 
 ## Related Docs
 
-- [SNMP Simulator Guide](snmp_simulator_guide.md)
+- [Simulator Guide](snmp_simulator_guide.md)
 - [MIB Browser Guide](mib_browser_guide.md)
-- [API Reference](api_reference.md)
 - [Troubleshooting](troubleshooting.md)

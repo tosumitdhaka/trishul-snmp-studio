@@ -1,28 +1,35 @@
-FROM python:3.10-slim
+FROM node:20-slim AS frontend-build
+
+WORKDIR /app/frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+
+FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y \
-    snmp \
     procps \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+COPY alembic.ini /app/alembic.ini
 COPY backend/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-COPY backend /app/backend
-COPY frontend/src /app/frontend/src
-
-RUN sed -i 's/^mibs :/# mibs :/' /etc/snmp/snmp.conf && \
-    echo "mibdirs +/app/backend/data/mibs" >> /etc/snmp/snmp.conf && \
-    echo "mibs +ALL" >> /etc/snmp/snmp.conf
+COPY backend/alembic /app/backend/alembic
+COPY backend/app /app/backend/app
+COPY backend/mibs_bundled /app/backend/mibs_bundled
+COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 WORKDIR /app/backend
 
-ENV MODULE_NAME="main"
-ENV VARIABLE_NAME="app"
 ENV PORT=8000
 
 EXPOSE 8000 1061/udp 1162/udp
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

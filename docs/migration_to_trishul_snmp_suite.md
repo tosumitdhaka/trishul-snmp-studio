@@ -1,81 +1,91 @@
-# Migration To Trishul SNMP Suite
+# Migration To Trishul SNMP Suite 2.0.0
 
-This guide covers the `1.4.0` cutover from the legacy split runtime to the merged `Trishul SNMP Suite` deployment.
+This guide covers migration from the older `1.x` runtime line to the current
+`2.0.0` platform.
+
+This document intentionally references `1.x` and legacy runtime names because
+it is the migration guide. Use the other operator docs for the normal `2.0.0`
+steady-state view.
 
 ## What Changed
 
-- Product name: `Trishul SNMP Suite`
-- Canonical image: `ghcr.io/<owner>/trishul-snmp-suite`
-- Canonical installer: `./install-trishul-snmp-suite.sh`
-- Canonical container name: `trishul-snmp-suite`
-- Canonical data volume: `trishul-snmp-suite-data`
-- Runtime shape: one container serving UI, API, WebSocket, and docs
+`2.0.0` changes the backend platform substantially, but the shipped release UI
+keeps the familiar page-based operator shell.
 
-## Legacy Names Still Recognized During Migration
+Main changes:
 
-- Containers:
-  - `trishul-snmp-backend`
-  - `trishul-snmp-frontend`
-- Volume:
-  - `trishul-snmp-data`
-- Script:
-  - `install-trishul-snmp.sh`
+- new FastAPI runtime under `backend/app`
+- single API surface under `/api/...` plus the live shell socket at `/api/ws`
+- SQLite-backed product state with Alembic migrations
+- in-process SNMP runtime — no subprocess simulator or trap-receiver workers
+- compiled bundle pipeline via `trishul-smi`; active MIB bundle queried in memory
 
-## Automatic Migration Behavior
+## What The Installer Still Does
 
-When you run `./install-trishul-snmp-suite.sh up` or `up-local`:
+The installer still helps with Docker-era migration by:
 
-1. The installer pulls or builds the merged suite image.
-2. Legacy containers are stopped and removed if present.
-3. The new `trishul-snmp-suite-data` volume is created if needed.
-4. If `trishul-snmp-data` exists and the new volume is still empty, data is copied forward automatically.
-5. The old volume is left in place for rollback safety.
-6. The merged `trishul-snmp-suite` container is started.
+- stopping legacy containers if present
+- creating the `trishul-snmp-suite-data` volume if needed
+- copying the old Docker volume forward when the new volume is empty
+- keeping the old volume intact for rollback
 
-## Recommended Upgrade Commands
+## What Carries Forward Best
 
-Published image:
+The restored release shell is designed to stay close to the older operator
+flow, so these areas usually carry forward most naturally:
 
-```bash
-./install-trishul-snmp-suite.sh up
-```
+- credentials bootstrapped from legacy files into SQLite
+- uploaded MIB file paths copied with the data volume
+- simulator custom data stored under the shared data root
+- familiar page-level operator workflows
 
-Local build from this checkout:
+Even when files are preserved, validate them after upgrade rather than assuming
+they are still correct for the new runtime.
 
-```bash
-./install-trishul-snmp-suite.sh up-local
-```
+## What Still Needs Manual Validation
 
-Legacy wrapper:
+Do not assume all old state is automatically correct after upgrade.
 
-```bash
-./install-trishul-snmp.sh up
-```
+Manually verify:
 
-## Port Behavior
+- loaded MIB catalog contents
+- simulator custom data behavior
+- trap history expectations
+- app settings
+- any saved operator habits that depended on the old container layout
 
-- `APP_PORT` is the primary host port for the merged application.
-- `FRONTEND_PORT` is accepted as a legacy alias for `APP_PORT`.
-- `BACKEND_PORT` is optional and exposes the same merged application on a second host port during transition.
+The new runtime stores durable state in SQLite and compiled bundle artifacts, so
+the old file layout is no longer the whole source of truth.
 
-Example:
+## Recommended Upgrade Path
 
-```bash
-FRONTEND_PORT=8980 BACKEND_PORT=8900 ./install-trishul-snmp-suite.sh up-local
-```
+1. create a backup before changing the runtime
+2. run `./install-trishul-snmp-suite.sh up` or `up-local`
+3. log in to the new shell
+4. rotate credentials in `Settings`
+5. verify or reload MIBs in `MIB Manager`
+6. validate simulator and walk flows
+7. validate trap receive and send flows
+8. review dashboard status and settings metadata
 
-In that mode:
+## Operational Differences To Expect
 
-- `http://localhost:8980` is the canonical app URL.
-- `http://localhost:8900` is a compatibility URL to the same app.
+Compared with `1.x`:
+
+- the backend is now FastAPI plus SQLite; no separate Nginx layer or subprocess workers
+- the SNMP responder and trap receiver run in-process as async tasks
+- live shell updates come from the FastAPI-served `/api/ws` socket directly, with no UDP loopback IPC
+- active credentials and sessions are stored in SQLite, not only `secrets.json`
+- MIB catalog is queried from the in-memory compiled bundle, not from a pysnmp mibBuilder
+- durable notification history and bundle state live in SQLite
 
 ## Rollback Guidance
 
 If you need to roll back during validation:
 
-1. Stop the merged container.
-2. Keep `trishul-snmp-suite-data` intact.
-3. Recreate the legacy containers if required.
-4. Use `trishul-snmp-data` as the preserved pre-cutover data source.
+1. stop the merged `2.0.0` container
+2. keep `trishul-snmp-suite-data` intact
+3. use the preserved `trishul-snmp-data` volume as the source of truth for the old runtime
+4. recreate the old containers only if you intentionally return to `1.x`
 
 The installer does not delete the old volume automatically.

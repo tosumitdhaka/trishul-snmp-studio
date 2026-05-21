@@ -1,84 +1,82 @@
 # MIB Browser Guide
 
-The MIB Browser is the exploration tool for loaded and system MIB content.
+`MIB Browser` is the inspection page for the current release UI.
+
+Use it after loading MIB files in `MIB Manager` when you need to browse a tree,
+search symbols, inspect details, or jump into `Walk & Parse` or `Traps`.
+
+## Before You Start
+
+For the best experience:
+
+1. load the MIB files you need in `MIB Manager`
+2. confirm the loaded count is non-zero
+3. open `MIB Browser`
+
+If no MIBs are loaded, the browser can still show numeric root nodes, but
+symbolic detail and search coverage will be limited.
 
 ## Main Views
 
-The browser supports two navigation modes:
+The page supports two main browsing modes:
 
-- **By Module** for module-oriented exploration
-- **By OID** for hierarchy-oriented exploration
+- module view
+- numeric OID hierarchy view
 
-Both modes share the same detail panel and export actions.
+Module view is the fastest way to inspect one module at a time. OID view is
+better when you already know the numeric subtree you want.
 
 ## Search And Filters
 
-The left-side search and filter area lets you:
+Use the search box for:
 
-- search by object name
-- search by numeric OID
-- search by description text
-- filter by module
-- filter by object type
+- object names
+- notification names
+- module names
+- numeric OIDs
 
-Examples:
+Combine search with:
 
-- `ifDescr`
-- `1.3.6.1.2.1.1.1`
-- `interface`
+- module filter
+- type filter
 
-## Tree Navigation
+to narrow the result set quickly.
 
-The tree supports:
+## Node Detail
 
-- lazy expansion
-- depth control
-- expand and collapse controls
-- module filtering
+Selecting a node shows:
 
-The current tree state is intended to be usable on both desktop and reduced-zoom layouts.
-
-## Details Panel
-
-The right-side panel shows metadata for the selected node, including:
-
-- name
-- OID
+- full symbolic name
+- numeric OID
 - module
 - type
+- syntax
+- access and status when available
 - description
-- related trap objects when the node is a notification
+- index members for table objects
+- trap object members for notifications
 
-## Export
+## Jump Actions
 
-The browser can export the **current view only**:
+The browser can hand a selected symbol to other pages:
 
-- current search results
-- or the currently loaded tree with the active view mode and filters
+- `Use in Walker`
+- `Use in Traps`
 
-Formats:
+Use this flow when you want to avoid retyping long symbolic names or numeric
+targets.
 
-- JSON
-- CSV
+## Common Failure Patterns
 
-## Integration Shortcuts
+Check these first if browse or search looks incomplete:
 
-The browser is connected to the rest of the app:
-
-- send a notification into Trap Sender
-- jump into Walker with the selected OID
-
-## Recommended Workflow
-
-1. Load or upload the MIBs you care about.
-2. Search for the object or notification.
-3. Review details on the right.
-4. Export the current result set if needed.
-5. Jump into Walker or Trap Sender for the next step.
+- the required MIB file never loaded
+- filters are still active from a previous session
+- the symbol exists only in a dependency that is still missing
+- the current node was removed after a reload
 
 ## Related Docs
 
 - [MIB Manager Guide](mib_manager_guide.md)
-- [Walker Guide](walker_guide.md)
-- [Trap Manager Guide](trap_manager_guide.md)
-- [API Reference](api_reference.md)
+- [Walk & Parse Guide](walker_guide.md)
+- [Traps Guide](trap_manager_guide.md)

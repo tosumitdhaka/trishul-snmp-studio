@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This guide covers the most common runtime and workflow issues in Trishul SNMP Suite.
+This guide covers the most common `2.0.0` runtime and operator issues.
 
 ## The App Does Not Start
 
@@ -16,158 +16,126 @@ Common causes:
 - `TRAP_PORT` already in use
 - Docker not running
 
-If you need different ports:
+If needed, choose different ports:
 
 ```bash
 APP_PORT=8980 SNMP_PORT=2161 TRAP_PORT=2162 ./install-trishul-snmp-suite.sh up
 ```
 
-## The UI Loads But I Cannot Log In
+## The UI Loads But Login Fails
 
 Check:
 
 - you are using the expected app URL
-- you are using the current credentials
-- the token is not expired
+- the credentials are current
+- the session token is not expired
 
-Default credentials only apply until you change them:
+Important `2.0.0` note:
 
-- username: `admin`
-- password: `admin123`
+- credentials are stored in SQLite-backed app settings, not only in `secrets.json`
+- there is no in-product password-reset flow yet
 
-If you changed credentials and forgot them, inspect the persisted secrets file in the runtime data directory before deciding on a reset.
+If you lost access, recover from a backup or edit the SQLite-backed auth records
+offline before restarting the app.
 
-## The Simulator Will Not Start
+## MIB Manager Upload Or Reload Fails
+
+Check:
+
+- the file extension is supported
+- validation reported missing dependencies
+- the reload returned file-specific errors
+- the symbol you want is in a MIB that actually loaded successfully
+
+If dependency fetch is disabled in your environment, upload missing MIBs
+manually first.
+
+## Symbolic Names Do Not Resolve
+
+Check:
+
+- the required MIBs are loaded
+- the current MIB set contains the symbol you expect
+- you are using the right module and symbol name
+
+If no matching MIBs are loaded, use numeric OIDs until the catalog is ready.
+
+## Simulator Will Not Start
 
 Common causes:
 
 - UDP port conflict
-- invalid community or saved config issues
+- invalid JSON in the custom data editor
+- querying the container-internal port instead of the host-exposed port
+- symbolic targets that require MIBs which are not loaded
 
-Actions:
+For same-host container validation, explicitly use the UDP ports exposed by your
+deployment, such as `1061`.
 
-1. Stop anything else that might already be bound to the chosen UDP port.
-2. Retry with a different port.
-3. Review the simulator page and container logs.
+## Traps Listener Starts But No Events Appear
 
-The API now verifies real startup success, so a failed bind should not be reported as healthy.
+Check:
 
-## The Trap Receiver Will Not Start
+- the listener port matches the sender target
+- the community string matches
+- the sender trap OID and varbind OIDs are valid
+- the trap library is not empty because of missing MIBs
 
-The most common issue is a UDP port conflict on `1162`.
+If events still do not appear, restart the listener and repeat the test with a
+simple loopback target such as `127.0.0.1:1162`.
 
-Try:
-
-```bash
-TRAP_PORT=2162 ./install-trishul-snmp-suite.sh restart
-```
-
-If the receiver starts but no traps appear:
-
-- confirm the sender target and port
-- verify community and firewall rules
-- leave `Resolve OIDs` enabled only if the current MIB set supports what you expect
-
-## A Walk Returns Unexpected Or Empty Results
+## Walk & Parse Fails
 
 Check:
 
 - host
 - UDP port
-- community string
-- root OID
-- whether the simulator or target device is actually responding
+- community
+- whether the target device or local responder is actually reachable
+- whether the root OID is valid
 
-If parsing returns nothing but raw output exists, the backend may return label-oriented output rather than structured `OID = value` pairs.
+When validating locally in Docker, prefer the exposed host UDP port instead of
+the form defaults if those differ.
 
-## MIB Upload Fails
+## Upgrade From 1.x Looks Empty
 
-Check:
+This can happen even when the old Docker volume was copied forward.
 
-- file extension: only `.mib`, `.txt`, and `.my` are accepted
-- filename: directory traversal patterns are rejected
-- validation results in the upload modal
+The new runtime uses SQLite and compiled bundle artifacts, so validate:
 
-If dependencies are missing:
+1. MIBs in `MIB Manager`
+2. simulator custom data in `Simulator`
+3. traps flow in `Traps`
+4. metadata and settings in `Dashboard` and `Settings`
 
-- fetch them manually if trusted remote fetch is configured
-- or supply the missing files yourself
+## Where Runtime State Lives
 
-Validation never fetches remotely.
+Default container path:
 
-## Remote Dependency Fetch Does Not Work
+- `/app/backend/data/`
 
-Check Settings:
+Important runtime paths:
 
-- remote sources are valid URLs
-- each source contains `@mib@`
-- auto-fetch is enabled only if you expect upload or reload to fetch automatically
-
-Remember:
-
-- manual fetch is available in the MIB Manager
-- validation remains read-only
-
-## WebSocket Status Shows Offline
-
-Possible causes:
-
-- the app container is not healthy
-- session token expired
-- you logged out in another tab
-
-The app intentionally closes active WebSocket sessions when logout or timeout occurs.
-
-Check:
-
-- app reload behavior
-- current login state
-- container logs
-
-## Upgrade From Legacy Split Runtime Did Not Preserve Data
-
-Read [Migration To Trishul SNMP Suite](migration_to_trishul_snmp_suite.md).
-
-Expected behavior:
-
-- old containers are stopped
-- old `trishul-snmp-data` is copied into `trishul-snmp-suite-data` if the new volume is empty
-- the old volume is preserved
-
-If migration did not happen as expected:
-
-1. stop the new container
-2. inspect both volumes
-3. restore from the preserved old volume or a backup if needed
-
-## Where To Look For Runtime Data
-
-Container path:
-
-- `/app/backend/data`
-
-Common files:
-
-- `configs/custom_data.json`
-- `configs/secrets.json`
-- `configs/stats.json`
-- `configs/app_settings.json`
-- `traps.jsonl`
+- `trishul_v2.sqlite3`
+- `bundles/sets/`
+- `bundles/cache/tsmi/`
 - `mibs/`
+- `configs/custom_data.json`
+- `logs/`
 
 ## Useful Commands
 
 ```bash
 ./install-trishul-snmp-suite.sh status
 ./install-trishul-snmp-suite.sh logs
-docker compose logs -f app
-python3 -m pytest
+npm --prefix frontend run build
+.venv/bin/python scripts/run_release_gate.py
 ```
 
-If the problem is still unclear, start with the smallest reproducible workflow:
+If the problem is still unclear, reduce the workflow to:
 
 1. log in
-2. start the simulator
-3. walk the local simulator
-4. start the trap receiver
-5. send a local test trap
+2. start a responder in `Simulator`
+3. run one walk in `Walk & Parse`
+4. start a listener in `Traps`
+5. send one local trap

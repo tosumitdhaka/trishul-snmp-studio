@@ -1,82 +1,95 @@
-# Trap Manager Guide
+# Traps Guide
 
-The Trap Manager combines two workflows:
+`Traps` is the current release page for trap listener and trap sender workflows.
 
-- trap sending for validation and test generation
-- trap receiving for real-time monitoring during development or QA
+It keeps the familiar operator model:
 
-## Trap Sender
+- listener control
+- trap library from loaded MIBs
+- varbind editing
+- trap send
+- received-event history
 
-The sender lets you define:
+## Listener Control
 
-- target host
-- target UDP port
-- community string
-- trap OID
-- optional varbind list
+Use the listener form to choose:
 
-You can choose a trap by:
+- port
+- community
+- whether to resolve MIBs in the UI
 
-- selecting it from the trap library
-- entering the OID directly
-- jumping in from the MIB Browser
+For container-based local validation, use the host-facing UDP port exposed by
+your deployment. The default installer convention is `1162/udp`.
 
-The UI resolves symbolic trap names before submission. The backend API expects numeric OIDs.
+## Trap Library
 
-## VarBinds
+The trap library is backed by the current loaded MIB set.
 
-VarBinds can be added manually or selected through the UI flow.
+Use it to:
 
-Supported types include:
+- search for a trap symbol
+- inspect its numeric OID
+- review associated objects
+- load it directly into the sender
 
-- string
-- integer
-- counter
-- gauge
-- OID
-- IP address
-- TimeTicks
+The current sender uses a searchable trap-library field, so you can type part
+of a symbol and load the matching trap without leaving the page.
 
-## Trap Receiver
+If the trap library is empty, confirm your MIBs were loaded successfully in
+`MIB Manager`.
 
-The receiver can be started and stopped directly from the page.
+## Varbind Editing
 
-Configurable options:
+The sender supports manual varbind rows and a picker driven by loaded MIB
+objects.
 
-- UDP port
-- community string
-- `Resolve OIDs`
+Use the picker when:
 
-When enabled, MIB resolution enriches the trap view with names instead of only numeric OIDs where possible.
+- you want the correct symbolic object name quickly
+- you want the UI to prefill a reasonable data type
+- you are building a trap from a library entry
 
-## Real-Time View
+If the loaded MIB metadata defines enumerated integer values for an object, the
+value editor can switch from a free-text field to a drop-down selector for that
+varbind.
 
-The receiver panel shows:
+## Sending A Trap
 
-- current running state
-- received trap list
-- basic receiver metrics
-- resolved trap type and varbind details when available
+The normal loopback test is:
 
-Because the app uses WebSocket push, the receiver updates without polling.
+1. start the listener on `1162`
+2. set sender target to `127.0.0.1:1162`
+3. keep community `public`
+4. choose a trap or enter a numeric trap OID
+5. send the trap
 
-## Recommended Local Loopback Test
+Confirm the received-events table updates.
 
-1. Open Trap Manager.
-2. Start the receiver on `1162`.
-3. In the sender form, target `127.0.0.1:1162`.
-4. Pick a known trap such as `IF-MIB::linkDown`.
-5. Send the trap.
-6. Confirm it appears in the receiver table.
+## Received History
 
-## Operational Notes
+The page keeps a received-events table for recent trap activity.
 
-- Trap receiver lifecycle is validated on startup so a bind failure is reported instead of looking healthy.
-- Clearing the trap list removes stored received-trap entries from the runtime data file.
+Use it to:
+
+- confirm loopback delivery
+- inspect the source and time of an event
+- review simplified varbind output
+- clear the current received-event list when starting a fresh test cycle
+
+When the live shell socket is connected, newly received traps appear on the
+page without a manual refresh.
+
+## Common Failure Patterns
+
+Check these first when trap flows fail:
+
+- listener and sender ports do not match
+- community mismatch
+- trap OID or varbind OID is unresolved
+- trap library depends on MIBs that never loaded
 
 ## Related Docs
 
 - [MIB Manager Guide](mib_manager_guide.md)
 - [MIB Browser Guide](mib_browser_guide.md)
-- [API Reference](api_reference.md)
 - [Troubleshooting](troubleshooting.md)

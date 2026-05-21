@@ -1,96 +1,73 @@
 # Roadmap
 
-This roadmap groups the stable IDs from [issue_tracker.md](issue_tracker.md) into delivery tracks so planning stays tied to concrete work.
+This file tracks the shipped `2.0.0` release line and the first planned
+`2.1.0` follow-up queue.
 
-## Current Baseline
+The temporary `2.0.0` and `2.1.0` planning workspaces were removed from the
+active repo tree during the release cleanup. Use this file for release-level
+status and [issue_tracker.md](issue_tracker.md) for slice and backlog tracking.
 
-- `IMPR-002` is complete: non-root project docs now live under `docs/`, while `README.md` remains the entry point.
-- `1.3.0` shipped the hardening, workflow, and targeted feature baseline.
-- `1.3.1` shipped the UI polish and simulator activity improvements.
+## Current Delivery State
 
-## Release 1.3.0
+`2.0.0` is complete. All implementation slices `S0` through `S13` are `Done`.
 
-### Track 1: Hardening & Stability
+## Delivered In The 2.0.0 Line
 
-**Scope:** `BUG-001`, `BUG-002`, `BUG-003`, `BUG-004`, `BUG-005`, `BUG-006`, `GAP-001`
+### Platform And Runtime
 
-Delivered in `1.3.0`:
+- one FastAPI application serving the built release UI
+- SQLite-backed product state with Alembic migrations
+- bundle-first MIB compilation and activation via `trishul-smi`
+- in-process SNMP responder, manager, and notification runtime via `trishul-snmp`
+- flat service architecture: routes call services directly, no bridge or adapter layer
+- simulation rules: counter, random, timestamp, uptime
+- source group management for uploaded MIBs with shadowing detection and partial compile
 
-- Path-safe MIB validation handling
-- Stored-XSS cleanup across high-risk frontend views
-- Active WebSocket auth enforcement
-- Concurrent-safe stats persistence
-- Real startup readiness checks for simulator and trap receiver
-- Multi-arch Compose defaults
-- Smoke and regression coverage for core flows
+### Release UI
 
-### Track 2: Contributor Workflow & Release Hygiene
+- page-based shell: `Dashboard`, `Simulator`, `Walk & Parse`, `Traps`, `MIB Browser`, `MIB Manager`, `Settings`
+- single unified API surface under `/api/...`
+- durable notification history stored in the backend runtime/state layer
 
-**Scope:** `GAP-002`, `GAP-003`, `IMPR-003`
+### Packaging And Migration
 
-Delivered in `1.3.0`:
+- one suite image and installer
+- local build path from the repo checkout
+- legacy-volume copy-forward for operators coming from older runtimes
+- legacy `1.4.1` installer retained as a pinned compatibility path
 
-- Repo-local development setup guidance
-- Release checklist and version-bump documentation
-- Tracker-aware GitHub workflow and PR template conventions
+## Planned For 2.1.0
 
-### Track 3: Targeted Feature Expansion
+`2.1.0` should keep the current operator shell and surface backend capabilities
+that already exist in the platform but are not yet exposed in the shipped UI.
 
-**Scope:** `FEAT-001`, `FEAT-003`, `IMPR-001`
+The initial `2.1.0` follow-up queue is summarized in this file and mirrored in
+[issue_tracker.md](issue_tracker.md).
 
-Delivered in `1.3.0`:
+No secondary API surface is planned. Follow-up work should extend the current
+`/api/...` routes where needed.
 
-- Trusted-source MIB dependency fetch with manual default and optional auto-fetch during upload or reload
-- Current-view JSON and CSV export from the MIB browser
-- Shared frontend escaping helpers used by the release-facing UI paths
+Initial targets:
 
-## Release 1.3.1
+- bundle lifecycle UI on top of the existing bundle service
+- saved connection and simulator profiles in the current pages
+- notification history detail and replay in `Traps`
+- direct runtime tools such as `GET`, `GETNEXT`, `GETBULK`, inform send, and payload decode
+- richer dashboard and settings diagnostics through the current stats, runtime, and settings services
+- API and page refinements on the existing unified `/api/...` surface where they simplify the current UI
 
-### Track 4: UI Polish & Theme Consistency
+## Deferred Beyond 2.0.0
 
-**Scope:** `BUG-007`, `BUG-008`, `BUG-009`, `GAP-004`, `IMPR-004`, `IMPR-005`
+These items are intentionally out of the current release cut:
 
-Delivered in `1.3.1`:
-
-- Theme initialization before first paint so saved dark mode applies cleanly
-- Removal of hardcoded light and dark classes that previously left mixed surfaces after a theme switch
-- Dark-mode cleanup for sticky table headers, modal dialogs, code blocks, and log or result panels
-- Consistent button, badge, and icon styling across dashboard and feature pages
-- Responsive shell improvements for login and top-level navigation, including better theme-toggle accessibility
-- A repeatable UI review checklist covering desktop, mobile, light mode, and dark mode
-
-## Release 1.4.0
-
-### Track 5: Runtime and Packaging Cutover
-
-Delivered in `1.4.0`:
-
-- Frontend and backend merged into a single runtime image
-- FastAPI now serves the static UI directly
-- Deployment defaults simplified to one primary app port and one container
-- GHCR publishing moved to a single package image
-- Legacy installer flow preserved through a compatibility wrapper
-
-### Track 6: Product Rename and Upgrade Migration
-
-Delivered in `1.4.0`:
-
-- Product renamed to `Trishul SNMP Suite`
-- Canonical package and runtime slug renamed to `trishul-snmp-suite`
-- Installer migration added for legacy containers and volumes
-- Docker, docs, and release metadata aligned to the new name
-
-## Deferred Beyond 1.4.0
-
-**Scope:** `FEAT-002`, `FEAT-004`, `FEAT-005`, `FEAT-006`
-
-Notes:
-
-- `FEAT-002` SNMPv3 support remains the most prominent deferred feature after the `1.4.0` platform cutover.
-- Longer-term feature work stays behind the merged runtime and rename baseline established in `1.4.0`.
+- SNMPv3 runtime and UI parity
+- writable `SET` responder behavior
+- bundle import and export as first-class operator actions
+- one-click ecosystem demo flows
+- distributed polling or orchestration features
 
 ## Planning Rules
 
-- Update [issue_tracker.md](issue_tracker.md) first, then adjust roadmap references.
-- Keep roadmap entries phase-level; keep item detail in the tracker.
-- When a scope moves into active delivery, mirror it in GitHub issues and milestones using the same IDs.
+- update [issue_tracker.md](issue_tracker.md) when release state changes materially
+- keep detailed sequencing inline in this roadmap and the issue tracker
+- keep this file focused on release-level status, not implementation minutiae

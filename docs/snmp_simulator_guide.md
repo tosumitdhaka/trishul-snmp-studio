@@ -1,106 +1,89 @@
-# SNMP Simulator Guide
+# Simulator Guide
 
-The simulator lets you expose a lightweight SNMP agent for testing clients, walks, dashboards, and integrations without real hardware.
+`Simulator` is the current release page for controlling the SNMP responder.
 
-## What It Does
+It keeps the familiar operator flow:
 
-- starts a local SNMP agent process
-- serves data on a configurable UDP port
-- uses a configurable community string
-- generates values from loaded MIBs plus your custom overrides
-- streams lifecycle and request activity into the UI in real time
+- configure the responder port and community
+- edit custom OID data as JSON
+- start, stop, or restart the responder
+- inspect the local activity log
 
-## Supported Workflow
+## Before You Start
 
-The simulator is designed around SNMPv1 and SNMPv2c testing.
+For the smoothest workflow:
 
-Typical use cases:
+1. choose the host UDP port you want to expose
+2. use the same value in the page and in your deployment
+3. keep community `public` unless your test requires something else
 
-- local walk testing
-- client integration development
-- QA test fixtures
-- demonstration environments
-- validating MIB-driven OID resolution
+For the default installer path, local responder validation usually uses
+`1061/udp`.
 
-## Configuration
+## Custom Data Format
 
-The configuration card controls:
-
-- UDP port
-- community string
-
-If the simulator is already running, stop it before editing the configuration.
-
-## Custom Data
-
-The custom data editor stores JSON that overrides generated OID values.
+The editor accepts a JSON object that maps symbolic or numeric OIDs to simple
+values.
 
 Example:
 
 ```json
 {
-  "SNMPv2-MIB::sysName.0": "core-sw-01",
-  "IF-MIB::ifDescr.1": "uplink0",
-  "IF-MIB::ifSpeed.1": 1000000000
+  "SNMPv2-MIB::sysName.0": "demo-agent",
+  "IF-MIB::ifSpeed.1": 1000,
+  "1.3.6.1.2.1.1.6.0": "Lab Rack 7"
 }
 ```
 
-Notes:
+Practical notes:
 
-- keys can be symbolic OIDs such as `IF-MIB::ifDescr.1`
-- values are converted according to the underlying MIB object syntax
-- saving while the simulator is running writes the file and restarts the simulator automatically
+- string values become OCTET STRING values
+- integers become INTEGER values
+- booleans are normalized to integer values
+- symbolic names need the relevant MIBs loaded if you want resolution support
 
-## Lifecycle Controls
+## Starting And Stopping
 
-The status card exposes:
+The normal flow is:
 
-- `Start`
-- `Stop`
-- `Restart`
+1. save the current JSON
+2. start the simulator
+3. verify the status card shows the expected port and community
+4. stop or restart as needed
 
-The status panel also shows:
-
-- current state
-- uptime
-- SNMP request count
-- last activity time
+While the simulator is running, the page locks configuration inputs so the live
+binding is explicit.
 
 ## Activity Log
 
-The activity log is intended to be useful rather than noisy.
+The log pane records local lifecycle and request activity.
 
-It records:
+Use it to:
 
-- lifecycle events
-- configuration saves
-- startup and restart results
-- grouped walk activity
+- confirm the responder actually started
+- inspect request bursts during a walk
+- filter by severity
+- export or clear the current log view
 
-The log supports:
+## Recommended Local Validation
 
-- search
-- level filtering
-- export
-- clear
+1. set custom data for one or two well-known OIDs
+2. start the simulator on port `1061`
+3. open `Walk & Parse`
+4. run a walk against `127.0.0.1:1061`
+5. confirm the returned values match the simulator data
 
-## Recommended Local Test Loop
+## Common Failure Patterns
 
-1. Enter a few custom OID values.
-2. Save the JSON.
-3. Start the simulator.
-4. Open [Walker Guide](walker_guide.md) and walk `127.0.0.1:1061`.
-5. Confirm the simulator request count and activity log update.
+Check these first if the simulator does not behave as expected:
 
-## Operational Notes
-
-- Auto-start behavior is managed in Settings.
-- Runtime state is visible in the dashboard and the simulator page.
-- The merged `1.4.1` runtime serves the simulator UI and API from the same app.
+- UDP port conflict
+- invalid JSON in the editor
+- symbolic targets with missing MIB support
+- querying the container-internal port instead of the host-exposed port
 
 ## Related Docs
 
+- [Walk & Parse Guide](walker_guide.md)
 - [First Steps](first_steps.md)
-- [Walker Guide](walker_guide.md)
-- [API Reference](api_reference.md)
 - [Troubleshooting](troubleshooting.md)

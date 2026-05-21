@@ -1,0 +1,14 @@
+.git
+.venv
+.vscode
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+backend/data/
+backend/tests/
+docs/
+frontend/dist/
+frontend/node_modules/
+ui-2.0/
+scripts/__pycache__/

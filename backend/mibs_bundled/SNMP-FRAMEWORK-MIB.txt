@@ -1,0 +1,29 @@
+SNMP-FRAMEWORK-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    MODULE-IDENTITY,
+    snmpModules
+        FROM SNMPv2-SMI
+    DisplayString,
+    TEXTUAL-CONVENTION
+        FROM SNMPv2-TC;
+
+snmpFrameworkMIB MODULE-IDENTITY
+    LAST-UPDATED "200210140000Z"
+    ORGANIZATION "IETF SNMPv3 Working Group"
+    CONTACT-INFO "Bundled compatibility shim for Trishul SNMP Suite."
+    DESCRIPTION
+        "A compact SNMP-FRAMEWORK-MIB definition used to satisfy the
+         standard SnmpAdminString textual convention during bundled and
+         legacy upload compilation."
+    ::= { snmpModules 10 }
+
+SnmpAdminString ::= TEXTUAL-CONVENTION
+    DISPLAY-HINT "255t"
+    STATUS       current
+    DESCRIPTION
+        "Administrative string used by common notification and logging
+         modules."
+    SYNTAX       DisplayString (SIZE (0..255))
+
+END

@@ -1,104 +1,118 @@
 # Release Process
 
-This checklist is the repo source of truth for cutting a release after the `1.4.0` runtime merge and product rename.
+This checklist is the repo source of truth for cutting a release.
 
 ## 1. Lock Scope
 
 Before bumping versions:
 
-1. Update [issue_tracker.md](issue_tracker.md) so each included ID is `Done` and each deferred item is clearly marked.
-2. Update [roadmap.md](roadmap.md) so the release scope and deferred scope match the tracker.
-3. Check `README.md` for user-facing setup and scope summaries that mention the release.
-4. Confirm the matching GitHub milestone and labels follow [github_workflow.md](github_workflow.md).
+1. update [issue_tracker.md](issue_tracker.md) so included items are `Done`
+2. confirm shipped scope still matches [roadmap.md](roadmap.md)
+3. verify any deferred work is called out explicitly in docs and release notes
 
-Release-blocking bugs stay release gates.
-Do not cut a release while any release-blocking `BUG-*` item is still open.
+Do not cut a release while release-blocking issues remain open.
 
 ## 2. Bump Version Markers
 
-For `1.4.0` and later, the version markers that must stay aligned are:
+Version markers that must stay aligned:
 
 - `.env`
-- `backend/core/config.py`
 - `backend/app/core/config.py`
+- `backend/app/__init__.py`
+- `frontend/package.json`
 - `docker-compose.yml`
+- `install-trishul-snmp-suite.sh`
 - `docs/changelog.md`
 
-If the release changes public setup or packaging behavior, also review:
+If the release changes packaging or startup behavior, also review:
 
-- `README.md`
+- `Dockerfile`
+- `docs/installation_guide.md`
 - `docs/development_setup.md`
 - `docs/migration_to_trishul_snmp_suite.md`
-- `docs/github_workflow.md`
 
 ## 3. Update Release Notes
 
 Add a new section to [changelog.md](changelog.md) with:
 
-- Release date
-- Architecture or packaging changes
-- New features
-- Behavior changes
-- Fixes and migration notes
-
-Also add the compare link at the bottom, for example:
-
-```text
-[1.4.0]: https://github.com/tosumitdhaka/trishul-snmp-suite/compare/v1.3.0...v1.4.0
-```
+- release date
+- major architecture or behavior changes
+- new API or UI changes
+- migration notes
+- fixes
 
 ## 4. Verify The Tree
 
-Run the repo verification commands from the repo root:
+Run the full test suite from the repo root:
 
 ```bash
-python3 -m compileall backend
-python3 -m pytest
+.venv/bin/python -m pytest backend/ -q
 ```
 
-For release-facing changes, also verify these flows manually in a merged Docker runtime built from the release candidate:
+Expected result: the full backend suite passes. Do not pin release docs to a
+fixed pass count because the suite grows over time.
 
-- Login and logout
-- Simulator start, stop, and restart
-- Trap receiver start and trap send/receive
-- Walk execution
-- MIB upload, validation, reload, and dependency fetch behavior
-- Browser export in JSON and CSV
-- Settings metadata shows the expected version
-- Root UI, module partials, `/api/meta`, and `/docs` all load from the single app container
+Run the backend coverage gate:
 
-## 5. Publish Images
+```bash
+.venv/bin/python scripts/check_backend_coverage.py
+```
 
-Merging to `main` triggers `.github/workflows/ghcr-publish.yml`.
+Build the frontend and verify it compiles cleanly:
 
-That workflow publishes:
+```bash
+npm --prefix frontend run build
+```
+
+For packaging or deployment changes, also build and verify the container:
+
+```bash
+docker build -t trishul-snmp-suite-local:rc .
+```
+
+## 5. Manual Smoke
+
+Before publish, validate these flows in a local runtime built from the release
+candidate:
+
+1. login, logout, and credential rotation
+2. `Dashboard` loads status and counters; live connection indicator stays online
+3. `Simulator` starts, serves a local walk target, appends live activity updates
+4. `Walk & Parse` returns expected data from the local responder
+5. `Traps` starts a listener and records one received event live in the table
+6. `MIB Manager` uploads a MIB file and reloads; status reflects the new module
+7. `Settings` save and metadata panels load correctly
+8. `/api/meta`, `/api/health`, and `/docs` respond correctly
+9. `/api/ws` accepts an authenticated connection
+
+## 6. Publish Images
+
+Image publishing is automatic. After the release commit is pushed to `main`,
+GitHub Actions runs `.github/workflows/ghcr-publish.yml` and publishes:
 
 - `ghcr.io/<owner>/trishul-snmp-suite:latest`
 - `ghcr.io/<owner>/trishul-snmp-suite:${APP_VERSION}`
 
-The workflow builds for both:
+Multi-architecture manifest for `linux/amd64` and `linux/arm64`.
 
-- `linux/amd64`
-- `linux/arm64`
+Before calling the release complete, verify the workflow run succeeded and the
+expected tags are available.
 
-## 6. Migration and Rename Checks
+## 7. Migration Checks
 
-For the `1.4.0` cutover:
+Before shipping a public cut:
 
-1. Verify `install-trishul-snmp-suite.sh up` on a clean host.
-2. Verify `install-trishul-snmp.sh up` still works as a compatibility wrapper.
-3. Verify automatic migration from `trishul-snmp-data` to `trishul-snmp-suite-data`.
-4. Verify old `trishul-snmp-backend` and `trishul-snmp-frontend` containers are stopped and replaced.
-5. Follow [migration_to_trishul_snmp_suite.md](migration_to_trishul_snmp_suite.md) for operator-facing guidance.
+1. verify `install-trishul-snmp-suite.sh up` on a clean host
+2. verify `up-local` from a local checkout
+3. verify old Docker volumes are preserved during migration
+4. verify the migration guide accurately documents what is and is not converted
 
-## 7. Post-Release Checks
+## 8. Post-Release Checks
 
-After publish:
+After the publish completes:
 
-1. Pull the new image or run `docker compose up -d`.
-2. Confirm `/api/meta` and `/api/health` report the expected version.
-3. Confirm the Settings "About" card shows the same version.
-4. Re-check the changelog compare link and migration notes.
-5. Rename the GitHub repo to `trishul-snmp-suite` if the code patch landed before the external cutover.
-
-If any of those markers disagree, fix the repo first, then republish.
+1. pull or build the final image
+2. confirm `/api/meta` returns the release version
+3. confirm the shell header and `Settings` metadata show the same version
+4. confirm the changelog entry and compare links are correct
+5. confirm the installer still starts the expected image tag

@@ -1,8 +1,9 @@
 fastapi
 uvicorn[standard]
-pysnmp>=7.0.0
-pysnmp-mibs
-pysmi
+SQLAlchemy>=2.0,<2.1
+alembic>=1.13,<2
+trishul-smi==0.4.5
+trishul-snmp==0.3.1
 python-multipart
 aiofiles
 requests

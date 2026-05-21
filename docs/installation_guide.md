@@ -1,26 +1,28 @@
 # Installation Guide
 
-This guide covers the supported `1.4.1` installation paths for Trishul SNMP Suite.
+This guide covers the supported `2.0.0` installation paths for Trishul SNMP
+Suite.
 
 ## What Gets Installed
 
-The default runtime is now a single container that serves:
+The runtime is one container that serves:
 
-- the web UI
-- the REST API under `/api`
-- the WebSocket endpoint under `/api/ws`
-- the OpenAPI docs under `/docs`
+- the shell UI
+- the unified API under `/api/...`
+- the live shell socket at `/api/ws`
+- metadata and health under `/api/meta` and `/api/health`
+- OpenAPI docs under `/docs`
 
-Persistent data is stored in a Docker volume named `trishul-snmp-suite-data`.
+Persistent state is stored in the Docker volume `trishul-snmp-suite-data`.
 
 ## Prerequisites
 
 - Docker
 - Docker Compose v2 if you want to use `docker compose`
-- Free ports for:
-  - `8080/tcp` for the app UI by default
-  - `1061/udp` for the simulator by default
-  - `1162/udp` for the trap receiver by default
+- free ports for:
+  - `8080/tcp` app access by default
+  - `1061/udp` local responder testing by convention
+  - `1162/udp` local notification-listener testing by convention
 
 ## Recommended: One-Shot Installer
 
@@ -30,18 +32,38 @@ From a local checkout:
 ./install-trishul-snmp-suite.sh up
 ```
 
-What this does:
+What it does:
 
-- pulls `ghcr.io/<owner>/trishul-snmp-suite:latest`
+- pulls the published image
+- uses the image produced automatically by GitHub Actions on each push to `main`
 - creates the data volume if needed
-- migrates legacy data if the old volume is present
+- preserves legacy data volumes for rollback
 - starts the merged application container
 
 After startup:
 
-- App UI: `http://localhost:8080`
+- app UI: `http://localhost:8080`
 - API docs: `http://localhost:8080/docs`
-- Default login: `admin` / `admin123`
+- default login: `admin` / `admin123`
+
+The current installer also accepts explicit platform and image overrides:
+
+```bash
+./install-trishul-snmp-suite.sh up --platform linux/arm64
+./install-trishul-snmp-suite.sh up --image ghcr.io/tosumitdhaka/trishul-snmp-suite:latest
+./install-trishul-snmp-suite.sh up-local --platform linux/amd64 --image trishul-snmp-suite-local:test
+```
+
+Notes:
+
+- `--platform` tells Docker which manifest to pull, build, or run for the selected image
+- `--image` overrides the published image reference or the local build tag
+
+Environment variable equivalents are also supported:
+
+- `TRISHUL_IMAGE`
+- `DOCKER_PLATFORM`
+- `TRISHUL_DOCKER_PLATFORM`
 
 ## Build And Run From This Checkout
 
@@ -63,7 +85,7 @@ Useful companion commands:
 
 ## Docker Compose Path
 
-The checked-in `docker-compose.yml` runs the published single image:
+The repo still ships a Compose file for convenience:
 
 ```bash
 docker compose up -d
@@ -71,25 +93,7 @@ docker compose logs -f app
 docker compose down
 ```
 
-Default endpoints:
-
-- App UI: `http://localhost:8080`
-- API docs: `http://localhost:8080/docs`
-
-To build locally with Compose, add a `docker-compose.override.yml`:
-
-```yaml
-services:
-  app:
-    build: .
-    image: trishul-snmp-suite-local
-```
-
-Then run:
-
-```bash
-docker compose up --build
-```
+For `2.0.0` release validation, prefer the installer over Compose.
 
 ## Custom Ports
 
@@ -99,32 +103,84 @@ Primary app port:
 APP_PORT=8980 ./install-trishul-snmp-suite.sh up
 ```
 
-Custom SNMP and trap ports:
+Custom SNMP test ports:
 
 ```bash
 APP_PORT=8980 SNMP_PORT=2161 TRAP_PORT=2162 ./install-trishul-snmp-suite.sh up
 ```
 
-Legacy compatibility mode:
+Compatibility access:
 
 ```bash
 FRONTEND_PORT=8980 BACKEND_PORT=8900 ./install-trishul-snmp-suite.sh up-local
 ```
 
-In that compatibility mode:
+In that mode:
 
-- `FRONTEND_PORT` is treated as the primary app URL
+- `FRONTEND_PORT` acts as the main app URL
 - `BACKEND_PORT` exposes the same merged app on a second host port
 
-## Upgrade From The Legacy Split Runtime
+## Legacy `1.4.1` Runtime
 
-If you previously used:
+If you need the pinned merged runtime from the `1.4.1` line, use the legacy
+installer:
 
-- `trishul-snmp-backend`
-- `trishul-snmp-frontend`
-- `trishul-snmp-data`
+This section is intentional compatibility guidance. It is not the recommended
+`2.0.0` runtime path.
 
-then the new installer can migrate you automatically. Read [Migration To Trishul SNMP Suite](migration_to_trishul_snmp_suite.md) for the exact behavior.
+```bash
+./install-trishul-snmp-suite-v1.4.1.sh up
+```
+
+That installer intentionally keeps the old runtime names:
+
+- container: `trishul-snmp`
+- volume: `trishul-snmp-data`
+
+Its default ports are shifted so it can run alongside the `2.0.0` installer on
+the same host:
+
+- app UI: `http://localhost:8081`
+- SNMP: `2161/udp`
+- traps: `2162/udp`
+
+Useful legacy examples:
+
+```bash
+./install-trishul-snmp-suite-v1.4.1.sh up-cached
+./install-trishul-snmp-suite-v1.4.1.sh up --platform linux/arm64
+./install-trishul-snmp-suite-v1.4.1.sh up-cached --image ghcr.io/tosumitdhaka/trishul-snmp-suite:1.4.1
+APP_PORT=8980 ./install-trishul-snmp-suite-v1.4.1.sh up-cached
+```
+
+Notes:
+
+- `up-cached` uses an already-pulled local image instead of pulling again
+- `--platform` tells Docker which manifest to pull or run for the pinned `1.4.1` image
+- the same `TRISHUL_IMAGE`, `DOCKER_PLATFORM`, and `TRISHUL_DOCKER_PLATFORM` environment variables work here as well
+
+## First Login
+
+After installation:
+
+1. open the app
+2. log in as `admin` / `admin123`
+3. go to `Settings`
+4. rotate the operator credentials
+5. go to `Dashboard`, `Simulator`, or `MIB Manager` to begin validation
+
+## Data Layout
+
+The runtime stores state under `/app/backend/data/`.
+
+Important paths include:
+
+- `trishul_v2.sqlite3`
+- `bundles/sets/`
+- `bundles/cache/tsmi/`
+- `mibs/`
+- `configs/custom_data.json`
+- `logs/`
 
 ## Backup And Restore
 
@@ -142,13 +198,13 @@ Restore a backup:
 
 Restore stops the running container first.
 
-## First Login
+## Upgrade From 1.x
 
-After installation:
+If you are coming from the old split or early merged runtime, read
+[Migration To Trishul SNMP Suite 2.0.0](migration_to_trishul_snmp_suite.md)
+before relying on old state.
 
-1. Open the app.
-2. Log in as `admin` / `admin123`.
-3. Change the password in Settings.
-4. Confirm the version and app metadata in the Settings "About" card.
-
-Next: [First Steps](first_steps.md)
+The installer can preserve or copy old Docker volumes forward, but the `2.0.0`
+runtime uses a new SQLite-plus-bundles model and does not automatically convert
+every old file-based workflow into current SQLite state and compiled bundle
+artifacts.

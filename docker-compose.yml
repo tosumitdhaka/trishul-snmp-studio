@@ -14,25 +14,13 @@ services:
       - PYTHONUNBUFFERED=1
       # Application Metadata
       - APP_NAME=${APP_NAME:-Trishul SNMP Suite}
-      - APP_VERSION=${APP_VERSION:-1.4.1}
+      - APP_VERSION=${APP_VERSION:-2.0.0}
       - APP_AUTHOR=${APP_AUTHOR:-Sumit Dhaka}
-      - APP_DESCRIPTION=${APP_DESCRIPTION:-Professional SNMP Simulation Tool}
-      # SNMP Settings
-      - SNMP_PORT=${SNMP_PORT:-1061}
-      - SNMP_COMMUNITY=${SNMP_COMMUNITY:-public}
-      - TRAP_PORT=${TRAP_PORT:-1162}
+      - APP_DESCRIPTION=${APP_DESCRIPTION:-Bundle-first SNMP lab and operations shell}
       # Security
       - SESSION_TIMEOUT=${SESSION_TIMEOUT:-3600}
       # CORS
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:8000,http://localhost:8900,http://localhost:8980}
-      # Auto-Start flags (Part A)
-      - AUTO_START_SIMULATOR=${AUTO_START_SIMULATOR:-true}
-      - AUTO_START_TRAP_RECEIVER=${AUTO_START_TRAP_RECEIVER:-true}
-      # Remote MIB dependency fetch
-      - MIB_AUTO_FETCH=${MIB_AUTO_FETCH:-false}
-      - MIB_REMOTE_SOURCES=${MIB_REMOTE_SOURCES:-}
-      # WebSocket internal UDP side-channel
-      - WS_INTERNAL_PORT=${WS_INTERNAL_PORT:-19876}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s

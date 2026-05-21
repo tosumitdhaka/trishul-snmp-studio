@@ -1,0 +1,1344 @@
+window.MibsModule = {
+    currentTrapData: null,
+    uploadModal: null,
+    failedMibsModal: null,
+    trapDetailsModal: null,
+    allMibs: [],
+    allTraps: [],
+    currentStatus: null,
+    validationState: null,
+    selectedMibPaths: new Set(),
+    deletingMibPaths: new Set(),
+    _domListeners: [],
+    _statusCacheValid: false,
+    _trapCacheValid: false,
+    _statusRequestId: 0,
+    _trapRequestId: 0,
+
+    buildListPlaceholder: function(options) {
+        return `<li class="list-group-item border-0 bg-transparent">${TrishulUtils.buildPanelPlaceholder({
+            ...options,
+            compact: true,
+        })}</li>`;
+    },
+
+    buildTablePlaceholderRow: function(options) {
+        return `<tr><td colspan="5" class="p-0 border-0">${TrishulUtils.buildPanelPlaceholder({
+            ...options,
+            compact: true,
+        })}</td></tr>`;
+    },
+
+    init: function() {
+        this.destroy();
+        this.uploadModal = new bootstrap.Modal(document.getElementById('uploadModal'));
+        this.failedMibsModal = new bootstrap.Modal(document.getElementById('failedMibsModal'));
+        this.trapDetailsModal = new bootstrap.Modal(document.getElementById('trapDetailsModal'));
+
+        this.bindDomListeners();
+        this.initDropzone();
+
+        if (!this._statusCacheValid) {
+            this.loadStatus();
+        } else if (this.currentStatus) {
+            this.applyStatusSnapshot(this.currentStatus);
+        }
+        if (!this._trapCacheValid) {
+            this.loadTraps();
+        } else {
+            this.applyTrapSnapshot(this.allTraps);
+        }
+    },
+
+    destroy: function() {
+        this._statusRequestId += 1;
+        this._trapRequestId += 1;
+        this._domListeners.forEach(([element, type, handler, options]) => {
+            try {
+                element.removeEventListener(type, handler, options);
+            } catch (_error) {}
+        });
+        this._domListeners = [];
+        try { this.uploadModal?.hide(); } catch (_error) {}
+        try { this.failedMibsModal?.hide(); } catch (_error) {}
+        try { this.trapDetailsModal?.hide(); } catch (_error) {}
+        this.uploadModal = null;
+        this.failedMibsModal = null;
+        this.trapDetailsModal = null;
+    },
+
+    bindDomEvent: function(element, type, handler, options) {
+        if (!element || typeof element.addEventListener !== 'function') {
+            return;
+        }
+        element.addEventListener(type, handler, options);
+        this._domListeners.push([element, type, handler, options]);
+    },
+
+    bindDomListeners: function() {
+        this.bindDomEvent(document.getElementById('trap-search'), 'input', (e) => {
+            this.filterTraps(e.target.value);
+        });
+
+        this.bindDomEvent(document.getElementById('mib-upload-input'), 'change', () => {
+            this.validateFiles();
+        });
+        this.bindDomEvent(document.getElementById('mib-upload-group'), 'change', () => {
+            const input = document.getElementById('mib-upload-input');
+            if (input && input.files && input.files.length > 0) {
+                this.validateFiles();
+            }
+        });
+        this.bindDomEvent(document.getElementById('mib-filter-query'), 'input', () => {
+            this.handleMibFilterChange();
+        });
+        this.bindDomEvent(document.getElementById('mib-filter-source-group'), 'change', () => {
+            this.handleMibFilterChange();
+        });
+    },
+
+    initDropzone: function() {
+        const dropzone = document.getElementById('mib-dropzone');
+        const overlay  = document.getElementById('drop-overlay');
+        const fileInput = document.getElementById('mib-upload-input');
+
+        if (!dropzone || !overlay || !fileInput) return;
+
+        const preventDefaults = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+        };
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            this.bindDomEvent(dropzone, eventName, preventDefaults, false);
+        });
+
+        let dragCounter = 0;
+
+        this.bindDomEvent(dropzone, 'dragenter', () => {
+            dragCounter++;
+            overlay.classList.remove('d-none');
+            overlay.classList.add('d-flex');
+        });
+
+        this.bindDomEvent(dropzone, 'dragleave', () => {
+            dragCounter--;
+            if (dragCounter === 0) {
+                overlay.classList.add('d-none');
+                overlay.classList.remove('d-flex');
+            }
+        });
+
+        this.bindDomEvent(dropzone, 'drop', (e) => {
+            dragCounter = 0;
+            overlay.classList.add('d-none');
+            overlay.classList.remove('d-flex');
+
+            const files = e.dataTransfer.files;
+
+            if (files && files.length > 0) {
+                // 1. Open modal first — this resets the form fields
+                MibsModule.showUploadModal();
+
+                // 2. Re-assign dropped files via DataTransfer (FileList is read-only)
+                const transfer = new DataTransfer();
+                Array.from(files).forEach(f => transfer.items.add(f));
+                fileInput.files = transfer.files;
+
+                // 3. Auto-validate after files are safely set
+                // Slight delay ensures modal is visible and DOM is ready
+                setTimeout(() => MibsModule.validateFiles(), 100);
+            }
+        });
+    },
+
+    applyStatusSnapshot: function(data) {
+        if (!data || typeof data !== 'object') return;
+
+        this.currentStatus = data;
+        this.allMibs = Array.isArray(data.mibs) ? data.mibs : [];
+        this.reconcileMibSelection();
+
+        const loadedEl = document.getElementById('mib-count-loaded');
+        if (loadedEl) {
+            loadedEl.textContent = Number(data.loaded || 0);
+        }
+
+        const failedEl = document.getElementById('mib-count-failed');
+        if (failedEl) {
+            failedEl.textContent = Number(data.failed || 0);
+        }
+
+        const failedSummaryBtn = document.getElementById('mib-failed-summary-btn');
+        if (failedSummaryBtn) {
+            failedSummaryBtn.disabled = !(Array.isArray(data.errors) && data.errors.length > 0);
+        }
+
+        this.populateSourceGroupOptions(data.source_groups || []);
+        this.populateMibFilterSourceGroupOptions(data.source_groups || [], this.allMibs);
+        this.populateExportSourceGroupOptions(data.source_groups || [], data.mibs || []);
+
+        const trapCountEl = document.getElementById('mib-count-traps');
+        if (trapCountEl) {
+            const loadedTraps = this.allMibs.reduce((sum, mib) => sum + Number(mib && mib.traps || 0), 0);
+            trapCountEl.textContent = loadedTraps;
+        }
+
+        this.renderMibList();
+        this.renderFailedMibs(data.errors || []);
+    },
+
+    loadStatus: async function() {
+        const requestId = ++this._statusRequestId;
+        const list = document.getElementById('mib-list');
+        // Only show loading spinner on first ever load; on page switch render
+        // cached data immediately and refresh silently in background.
+        if (list && !this.currentStatus) {
+            list.innerHTML = this.buildListPlaceholder({
+                state: 'loading',
+                title: 'Loading MIB sources',
+                copy: 'Reading the active source inventory.',
+            });
+        } else if (this.currentStatus) {
+            // Render stale data immediately so the page doesn't blank out
+            this.applyStatusSnapshot(this.currentStatus);
+        }
+
+        try {
+            const res  = await fetch('/api/mibs/status');
+            const data = await res.json();
+            if (requestId !== this._statusRequestId) return;
+
+            this._statusCacheValid = true;
+            this.applyStatusSnapshot(data);
+        } catch (e) {
+            if (requestId !== this._statusRequestId) return;
+            console.error('Failed to load MIB status', e);
+            if (list) {
+                list.innerHTML = this.buildListPlaceholder({
+                    icon: 'fa-triangle-exclamation',
+                    title: 'Unable to load MIB sources',
+                    copy: 'Refresh the page or check the backend logs for details.',
+                });
+            }
+        }
+    },
+
+    renderMibList: function() {
+        const list = document.getElementById('mib-list');
+        if (!list) return;
+        const esc = TrishulUtils.escapeHtml;
+        const mibs = this.getFilteredMibs();
+        const filters = this.getMibFilterState();
+        const hasFilter = Boolean(filters.query || filters.sourceGroup);
+
+        if (this.allMibs.length === 0) {
+            list.innerHTML = this.buildListPlaceholder({
+                icon: 'fa-inbox',
+                title: 'No MIB sources',
+                copy: 'Upload MIB files or enable remote dependency fetch before building a bundle.',
+            });
+            this.updateMibSelectionState();
+            return;
+        }
+
+        if (mibs.length === 0) {
+            list.innerHTML = this.buildListPlaceholder({
+                icon: hasFilter ? 'fa-filter' : 'fa-inbox',
+                title: hasFilter ? 'No matching MIB sources' : 'No MIB sources',
+                copy: hasFilter
+                    ? 'Clear the current filter or choose a different source group.'
+                    : 'Upload MIB files to populate the source inventory.',
+            });
+            this.updateMibSelectionState();
+            return;
+        }
+
+        list.innerHTML = mibs.map(mib => {
+            const path = this.mibPath(mib);
+            const isDeleting = this.isDeletingMibPath(path);
+            return `
+            <li class="list-group-item py-2 mib-list-item ${this.isMibSelected(mib) ? 'mib-list-item-selected' : ''}">
+                <div class="d-flex align-items-start gap-2">
+                    ${mib.deletable ? `
+                        <div class="form-check mt-1 mb-0">
+                            <input type="checkbox"
+                                   class="form-check-input mib-selection-checkbox"
+                                   data-path="${esc(path)}"
+                                   onchange="MibsModule.toggleMibSelection(this)"
+                                   ${isDeleting ? 'disabled' : ''}
+                                   ${this.isMibSelected(mib) ? 'checked' : ''}>
+                        </div>
+                    ` : '<span class="mib-selection-spacer"></span>'}
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="mib-item-title-row">
+                            <i class="fas fa-book app-header-icon is-success"></i>
+                            <strong class="mib-item-title">${esc(mib.name)}</strong>
+                            ${this.renderSourceBadge(mib)}
+                            ${mib.source_group && !['bundled', 'auto-fetched'].includes(String(mib.source_group).toLowerCase()) ? `<span class="badge app-badge is-light">${esc(mib.source_group)}</span>` : ''}
+                        </div>
+                        <div class="small text-muted mib-item-meta">
+                            <span>${Number(mib.objects || 0)} objects</span>
+                            <span class="app-meta-sep">·</span>
+                            <span>${Number(mib.traps || 0)} traps</span>
+                            ${Array.isArray(mib.imports) && mib.imports.length > 0 ? `<span class="app-meta-sep">·</span><span>${mib.imports.length} imports</span>` : ''}
+                        </div>
+                        ${Array.isArray(mib.imports) && mib.imports.length > 0 ? `
+                            <div class="small text-muted mib-item-detail app-truncate-line" title="${esc(mib.imports.join(', '))}">
+                                Imports: ${mib.imports.slice(0, 4).map(esc).join(', ')}${mib.imports.length > 4 ? ', ...' : ''}
+                            </div>
+                        ` : ''}
+                        ${mib.relative_path ? `
+                            <div class="small text-muted mib-item-detail app-truncate-line" title="${esc(mib.relative_path)}">
+                                Path: ${esc(mib.relative_path)}
+                            </div>
+                        ` : ''}
+                    </div>
+                ${mib.deletable ? `
+                    <button type="button" class="btn btn-sm btn-app-danger-outline mib-side-action" onclick="MibsModule.deleteMib(this.dataset.path)" data-path="${esc(path)}" ${isDeleting ? 'disabled aria-busy="true"' : ''}>
+                        <i class="fas ${isDeleting ? 'fa-spinner fa-spin' : 'fa-trash'}"></i>
+                    </button>
+                ` : ''}
+                </div>
+            </li>
+        `;
+        }).join('');
+
+        this.updateMibSelectionState();
+    },
+
+    mibPath: function(mib) {
+        return String((mib && (mib.relative_path || mib.file)) || '').trim();
+    },
+
+    isMibSelected: function(mib) {
+        const path = this.mibPath(mib);
+        return Boolean(path) && this.selectedMibPaths.has(path);
+    },
+
+    isDeletingMibPath: function(path) {
+        return Boolean(path) && this.deletingMibPaths.has(String(path).trim());
+    },
+
+    reconcileMibSelection: function() {
+        const available = new Set((this.allMibs || []).map(mib => this.mibPath(mib)).filter(Boolean));
+        this.selectedMibPaths = new Set(Array.from(this.selectedMibPaths).filter(path => available.has(path)));
+    },
+
+    getMibFilterState: function() {
+        const sourceGroup = String(document.getElementById('mib-filter-source-group')?.value || '').trim().toLowerCase();
+        const query = String(document.getElementById('mib-filter-query')?.value || '').trim().toLowerCase();
+        return { sourceGroup, query };
+    },
+
+    getFilteredMibs: function() {
+        const filters = this.getMibFilterState();
+        return (this.allMibs || []).filter((mib) => {
+            const sourceGroup = String(mib && mib.source_group ? mib.source_group : '').trim().toLowerCase();
+            if (filters.sourceGroup && sourceGroup !== filters.sourceGroup) {
+                return false;
+            }
+            if (!filters.query) {
+                return true;
+            }
+            const imports = Array.isArray(mib && mib.imports) ? mib.imports.join(' ') : '';
+            const searchText = [
+                mib && mib.name,
+                mib && mib.relative_path,
+                mib && mib.file,
+                mib && mib.source_group,
+                this.sourceLabel(mib),
+                imports,
+            ]
+                .filter(Boolean)
+                .join(' ')
+                .toLowerCase();
+            return searchText.includes(filters.query);
+        });
+    },
+
+    getVisibleDeletableMibs: function() {
+        return this.getFilteredMibs().filter(mib => mib && mib.deletable && this.mibPath(mib));
+    },
+
+    handleMibFilterChange: function() {
+        this.selectedMibPaths.clear();
+        this.renderMibList();
+    },
+
+    toggleMibSelection: function(input) {
+        const path = String(input?.dataset?.path || '').trim();
+        if (!path) return;
+        if (input.checked) {
+            this.selectedMibPaths.add(path);
+        } else {
+            this.selectedMibPaths.delete(path);
+        }
+        input.closest('.mib-list-item')?.classList.toggle('mib-list-item-selected', input.checked);
+        this.updateMibSelectionState();
+    },
+
+    selectVisibleMibs: function() {
+        this.getVisibleDeletableMibs().forEach(mib => {
+            const path = this.mibPath(mib);
+            if (path) this.selectedMibPaths.add(path);
+        });
+        this.renderMibList();
+    },
+
+    clearMibSelection: function() {
+        this.selectedMibPaths.clear();
+        this.renderMibList();
+    },
+
+    updateMibSelectionState: function() {
+        const summary = document.getElementById('mib-selection-summary');
+        const selectVisibleBtn = document.getElementById('mib-select-visible-btn');
+        const clearSelectionBtn = document.getElementById('mib-clear-selection-btn');
+        const deleteSelectedBtn = document.getElementById('mib-delete-selected-btn');
+        const filteredMibs = this.getFilteredMibs();
+        const visibleDeletable = filteredMibs.filter(mib => mib && mib.deletable && this.mibPath(mib));
+        const selectedVisibleCount = visibleDeletable.filter(mib => this.isMibSelected(mib)).length;
+        const totalSelected = this.selectedMibPaths.size;
+        const filters = this.getMibFilterState();
+        const filteredText = filters.query || filters.sourceGroup
+            ? `${filteredMibs.length} shown`
+            : `${this.allMibs.length} MIBs`;
+        const deleting = this.deletingMibPaths.size > 0;
+
+        if (summary) {
+            let text = filteredText;
+            if (visibleDeletable.length > 0) {
+                text += ` · ${selectedVisibleCount} selected`;
+            }
+            summary.textContent = text;
+        }
+        if (selectVisibleBtn) {
+            selectVisibleBtn.disabled = deleting || visibleDeletable.length === 0 || selectedVisibleCount === visibleDeletable.length;
+        }
+        if (clearSelectionBtn) {
+            clearSelectionBtn.disabled = deleting || totalSelected === 0;
+        }
+        if (deleteSelectedBtn) {
+            deleteSelectedBtn.disabled = deleting || totalSelected === 0;
+            deleteSelectedBtn.innerHTML = deleting
+                ? '<i class="fas fa-spinner fa-spin me-1"></i> Deleting...'
+                : `<i class="fas fa-trash me-1"></i> Delete Selected${totalSelected > 0 ? ` (${totalSelected})` : ''}`;
+        }
+    },
+
+    sourceLabel: function(mib) {
+        const sourceKind = String(mib && mib.source_kind ? mib.source_kind : '').toLowerCase();
+        if (sourceKind === 'bundled' || mib.builtin) return 'Bundled';
+        if (sourceKind === 'auto-fetched') return 'Auto-fetched';
+        if (sourceKind === 'uploaded') return 'Uploaded';
+        if (sourceKind === 'compiled') return 'Compiled';
+        return 'Managed';
+    },
+
+    renderSourceBadge: function(mib) {
+        const label = this.sourceLabel(mib);
+        if (label === 'Bundled') {
+            return '<span class="badge app-badge is-neutral ms-2">Bundled</span>';
+        }
+        if (label === 'Auto-fetched') {
+            return '<span class="badge app-badge is-warning ms-2">Auto-fetched</span>';
+        }
+        if (label === 'Uploaded') {
+            return '<span class="badge app-badge is-info ms-2">Uploaded</span>';
+        }
+        if (label === 'Compiled') {
+            return '<span class="badge app-badge is-primary ms-2">Compiled</span>';
+        }
+        return '';
+    },
+
+    renderFailedMibs: function(errors) {
+        const list = document.getElementById('failed-mib-list');
+        const total = document.getElementById('failed-mib-total-count');
+        const esc = TrishulUtils.escapeHtml;
+        const rows = Array.isArray(errors) ? errors : [];
+
+        if (total) {
+            total.textContent = rows.length;
+        }
+        if (!list) return;
+
+        if (rows.length === 0) {
+            list.innerHTML = `
+                <li class="list-group-item border-0 bg-transparent">
+                    <div class="app-panel-placeholder is-compact">
+                        <i class="fas fa-circle-check app-header-icon is-success"></i>
+                        <span class="app-panel-placeholder-title">No failed MIBs</span>
+                        <span class="app-panel-placeholder-copy">All stored sources are currently loading cleanly.</span>
+                    </div>
+                </li>
+            `;
+            return;
+        }
+
+        list.innerHTML = rows.map(mib => {
+            const path = this.mibPath(mib);
+            const isDeleting = this.isDeletingMibPath(path);
+            return `
+            <li class="list-group-item">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div class="flex-grow-1">
+                        <div class="d-flex align-items-center">
+                            <i class="fas fa-exclamation-circle app-header-icon is-danger me-2"></i>
+                            <strong class="app-status-text is-error">${esc(mib.name)}</strong>
+                        </div>
+                        <div class="small text-muted mt-1 font-monospace app-max-w-500 app-break-word">
+                            ${esc(mib.error || 'Unknown error')}
+                        </div>
+                        ${mib.file ? `<div class="small text-muted mt-1">Source: <code>${esc(mib.file)}</code></div>` : ''}
+                        ${mib.active_relative_path ? `<div class="small text-muted mt-1">Active source: <code>${esc(mib.active_relative_path)}</code></div>` : ''}
+                        ${mib.status === 'missing_deps' ? `
+                            <div class="mt-2">
+                                <span class="badge app-badge is-warning">Missing dependencies</span>
+                                ${mib.missing_deps && mib.missing_deps.length > 0 ? `
+                                    <div class="small mt-1">${mib.missing_deps.map(esc).join(', ')}</div>
+                                ` : ''}
+                                <button type="button" class="btn btn-xs btn-app-secondary ms-2" onclick="MibsModule.showDependencyHelp()">
+                                    <i class="fas fa-question-circle"></i> Help
+                                </button>
+                            </div>
+                        ` : ''}
+                    </div>
+                    ${mib.deletable ? `
+                        <button type="button" class="btn btn-sm btn-app-danger-outline" onclick="MibsModule.deleteMib(this.dataset.path)" data-path="${esc(path)}" ${isDeleting ? 'disabled aria-busy="true"' : ''}>
+                            <i class="fas ${isDeleting ? 'fa-spinner fa-spin' : 'fa-trash'}"></i>
+                        </button>
+                    ` : ''}
+                </div>
+            </li>
+        `;
+        }).join('');
+    },
+
+    openFailedMibsModal: function() {
+        const errors = Array.isArray(this.currentStatus?.errors) ? this.currentStatus.errors : [];
+        this.renderFailedMibs(errors);
+        const deleteAllBtn = document.getElementById('mib-delete-all-failed-btn');
+        if (deleteAllBtn) deleteAllBtn.disabled = errors.length === 0 || this.deletingMibPaths.size > 0;
+        if (errors.length === 0) {
+            TrishulUtils.showNotification('No failed MIBs', 'success');
+            return;
+        }
+        this.failedMibsModal.show();
+    },
+
+    deleteAllFailed: async function() {
+        const errors = Array.isArray(this.currentStatus?.errors) ? this.currentStatus.errors : [];
+        const paths = errors
+            .filter(e => e.deletable && e.file && !this.isDeletingMibPath(e.file))
+            .map(e => e.file);
+        if (paths.length === 0) {
+            TrishulUtils.showNotification('No deletable failed MIBs', 'warning');
+            return;
+        }
+        await this.deleteMibs(paths);
+        this.failedMibsModal.hide();
+    },
+
+    applyTrapSnapshot: function(traps) {
+        this.allTraps = Array.isArray(traps) ? traps : [];
+
+        const totalBadge = document.getElementById('trap-total-count');
+        if (totalBadge) {
+            totalBadge.textContent = this.allTraps.length;
+        }
+
+        const query = String(document.getElementById('trap-search')?.value || '').trim();
+        if (query) {
+            this.filterTraps(query);
+            return;
+        }
+        this.renderTraps(this.allTraps);
+    },
+
+    loadTraps: async function() {
+        const requestId = ++this._trapRequestId;
+        const tbody = document.getElementById('trap-table-body');
+        if (tbody && !this.allTraps.length) {
+            tbody.innerHTML = this.buildTablePlaceholderRow({
+                state: 'loading',
+                title: 'Loading trap catalog',
+                copy: 'Reading notifications from the active bundle.',
+            });
+        } else if (this.allTraps.length) {
+            this.applyTrapSnapshot(this.allTraps);
+        }
+
+        try {
+            const res  = await fetch('/api/mibs/traps');
+            const data = await res.json();
+            if (requestId !== this._trapRequestId) return;
+
+            this._trapCacheValid = true;
+            this.applyTrapSnapshot(data.traps || []);
+        } catch (e) {
+            if (requestId !== this._trapRequestId) return;
+            console.error('Failed to load traps', e);
+            if (tbody) {
+                tbody.innerHTML = this.buildTablePlaceholderRow({
+                    icon: 'fa-triangle-exclamation',
+                    title: 'Unable to load trap catalog',
+                    copy: 'Refresh the page or inspect the backend logs for details.',
+                });
+            }
+        }
+    },
+
+    renderTraps: function(traps) {
+        const tbody = document.getElementById('trap-table-body');
+        if (!tbody) return;
+        const esc = TrishulUtils.escapeHtml;
+
+        if (traps.length === 0) {
+            tbody.innerHTML = this.buildTablePlaceholderRow({
+                icon: 'fa-bell-slash',
+                title: 'No traps in catalog',
+                copy: 'The active bundle does not currently expose any notification definitions.',
+            });
+            return;
+        }
+
+        const loadedModules  = new Set();
+        if (this.currentStatus && this.currentStatus.mibs) {
+            this.currentStatus.mibs.forEach(mib => loadedModules.add(mib.name));
+        }
+
+        const knownSystemMibs = ['SNMPv2-MIB', 'SNMPv2-SMI', 'SNMP-FRAMEWORK-MIB'];
+
+        tbody.innerHTML = traps.map(trap => {
+            const isSystemMib = knownSystemMibs.includes(trap.module) && !loadedModules.has(trap.module);
+            const payload = esc(TrishulUtils.encodeDataAttr(trap));
+
+            return `
+            <tr ${isSystemMib ? 'class="table-secondary"' : ''}>
+                <td class="mib-trap-name-cell" title="${esc(trap.name)}">
+                    <div class="d-flex align-items-center mib-trap-row-main">
+                        <i class="fas fa-bell ${isSystemMib ? 'app-header-icon is-neutral' : 'app-header-icon is-warning'} me-2"></i>
+                        <strong class="mib-trap-name text-truncate">${esc(trap.name)}</strong>
+                        ${isSystemMib ? '<span class="badge app-badge is-neutral ms-2 app-fs-60">System</span>' : ''}
+                    </div>
+                </td>
+                <td title="${esc(trap.oid)}">
+                    <code class="small text-muted text-truncate d-block app-fs-70">${esc(trap.oid)}</code>
+                </td>
+                <td class="text-center" title="${esc(trap.module)}">
+                    <span class="${isSystemMib ? 'badge app-badge is-neutral app-fs-70 mib-trap-module-badge' : 'badge mib-module-badge app-fs-70 mib-trap-module-badge'}">${esc(trap.module)}</span>
+                </td>
+                <td class="text-center">
+                    <span class="badge app-badge is-info app-fs-70">${Number((trap.objects || []).length)}</span>
+                </td>
+                <td class="text-center">
+                    <div class="trap-action-buttons">
+                        <button type="button" class="btn btn-sm btn-app-secondary btn-icon py-0 px-2"
+                                onclick="MibsModule.handleTrapAction(this)"
+                                data-action="details"
+                                data-trap="${payload}"
+                                title="View Details">
+                            <i class="fas fa-info-circle"></i>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-app-secondary btn-icon py-0 px-2"
+                                onclick="MibsModule.handleTrapAction(this)"
+                                data-action="send"
+                                data-trap="${payload}"
+                                title="Send Trap">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+    },
+
+    handleTrapAction: function(button) {
+        const trap = TrishulUtils.decodeDataAttr(button?.dataset?.trap || '', null);
+        if (!trap) return;
+        if (button.dataset.action === 'details') {
+            this.showTrapDetails(trap);
+            return;
+        }
+        if (button.dataset.action === 'send') {
+            this.useTrapDirectly(trap);
+        }
+    },
+
+    useTrapDirectly: function(trap) {
+        sessionStorage.setItem('selectedTrap', JSON.stringify(trap));
+        window.location.hash = '#traps';
+    },
+
+    filterTraps: function(query) {
+        if (!this.allTraps) return;
+        const filtered = this.allTraps.filter(trap => {
+            const searchStr = `${trap.name} ${trap.module} ${trap.oid} ${trap.description}`.toLowerCase();
+            return searchStr.includes(query.toLowerCase());
+        });
+        this.renderTraps(filtered);
+    },
+
+    showTrapDetails: function(trap) {
+        this.currentTrapData = trap;
+
+        const title = document.getElementById('trap-detail-title');
+        const body  = document.getElementById('trap-detail-body');
+        const esc = TrishulUtils.escapeHtml;
+
+        title.textContent = trap.full_name;
+        const copyOid = esc(trap.oid || '');
+
+        body.innerHTML = `
+            <div class="app-surface-muted border rounded p-3 mb-3">
+                <div class="row g-3 small">
+                    <div class="col-sm-6">
+                        <div class="text-muted fw-bold mb-1">Name</div>
+                        <div><code>${esc(trap.name)}</code></div>
+                    </div>
+                    <div class="col-sm-6">
+                        <div class="text-muted fw-bold mb-1">Module</div>
+                        <div><span class="badge app-badge is-neutral">${esc(trap.module)}</span></div>
+                    </div>
+                    <div class="col-12">
+                        <div class="text-muted fw-bold mb-1">Full Name</div>
+                        <div><code>${esc(trap.full_name)}</code></div>
+                    </div>
+                    <div class="col-12">
+                        <div class="text-muted fw-bold mb-1">OID</div>
+                        <div class="d-flex align-items-center gap-2 flex-wrap">
+                            <code>${esc(trap.oid)}</code>
+                            <button type="button" class="btn btn-xs btn-app-secondary"
+                                    onclick="MibsModule.copyValue(this.dataset.copy)"
+                                    data-copy="${copyOid}">
+                                <i class="fas fa-copy"></i> Copy
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="text-muted fw-bold mb-1">Description</div>
+                        <div class="small text-muted">${esc(trap.description || 'No description available')}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-2">
+                <div class="text-muted fw-bold small mb-2">Associated Objects (VarBinds)</div>
+                ${(trap.objects || []).length > 0 ? `
+                    <div class="list-group app-scroll-panel app-max-h-260">
+                        ${(trap.objects || []).map(obj => `
+                            <div class="list-group-item d-flex justify-content-between align-items-center gap-3">
+                                <div class="min-w-0">
+                                    <code>${esc(obj.name)}</code>
+                                    <div class="small text-muted text-break">${esc(obj.full_name)}</div>
+                                </div>
+                                <code class="text-muted small text-break">${esc(obj.oid)}</code>
+                            </div>
+                        `).join('')}
+                    </div>
+                ` : '<div class="text-muted small">No associated objects defined</div>'}
+            </div>
+        `;
+
+        this.trapDetailsModal.show();
+    },
+
+    copyValue: function(value) {
+        navigator.clipboard.writeText(value || '')
+            .then(() => TrishulUtils.showNotification('Copied', 'success'))
+            .catch(() => TrishulUtils.showNotification('Copy failed', 'error'));
+    },
+
+    useTrapInSender: function() {
+        if (!this.currentTrapData) return;
+        sessionStorage.setItem('selectedTrap', JSON.stringify(this.currentTrapData));
+        window.location.hash = '#traps';
+        this.trapDetailsModal.hide();
+    },
+
+    showUploadModal: function() {
+        this.validationState = null;
+        document.getElementById('mib-upload-input').value = '';
+        document.getElementById('mib-upload-group').value = this.getSelectedSourceGroup();
+        document.getElementById('upload-validation-results').classList.add('d-none');
+        document.getElementById('dependency-alert').classList.add('d-none');
+        document.getElementById('validating-indicator').classList.add('d-none');
+        document.getElementById('btn-upload').disabled = true;
+        document.getElementById('btn-upload').innerHTML = '<i class="fas fa-upload"></i> Upload';
+        document.getElementById('btn-upload').title = '';
+        document.getElementById('btn-upload-partial').classList.add('d-none');
+        document.getElementById('btn-upload-partial').disabled = true;
+        this.uploadModal.show();
+    },
+
+    validateFiles: async function() {
+        const input = document.getElementById('mib-upload-input');
+        if (!input.files || input.files.length === 0) {
+            alert('Please select at least one file');
+            return;
+        }
+
+        // Show loading spinner, hide previous results
+        const indicator  = document.getElementById('validating-indicator');
+        const resultsDiv = document.getElementById('upload-validation-results');
+        const depAlert   = document.getElementById('dependency-alert');
+        const depList    = document.getElementById('dependency-list');
+        const validationList = document.getElementById('validation-list');
+        const uploadBtn = document.getElementById('btn-upload');
+        const partialBtn = document.getElementById('btn-upload-partial');
+
+        indicator.classList.remove('d-none');
+        resultsDiv.classList.add('d-none');
+        depAlert.classList.add('d-none');
+        uploadBtn.disabled = true;
+        uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Upload';
+        partialBtn.classList.add('d-none');
+        partialBtn.disabled = true;
+        this.validationState = null;
+
+        try {
+            const formData = new FormData();
+            for (let file of input.files) formData.append('files', file);
+            formData.append('source_group', this.getSelectedSourceGroup());
+
+            const res  = await fetch('/api/mibs/validate-batch', { method: 'POST', body: formData });
+            const data = await res.json();
+            const esc = TrishulUtils.escapeHtml;
+            this.validationState = data;
+
+            validationList.innerHTML = data.files.map(r => {
+                const hasLocalMissing = r.missing_deps.length > 0;
+                const partialBadge = r.ready_for_partial
+                    ? '<span class="badge app-badge is-info ms-2">Partial-ready</span>'
+                    : (
+                        r.partial_blockers && r.partial_blockers.length > 0
+                            ? '<span class="badge app-badge is-warning ms-2">Blocked</span>'
+                            : ''
+                    );
+                const statusClass  = r.valid ? 'border-success' : 'border-danger';
+                const statusBadge  = r.valid
+                    ? '<span class="badge app-badge is-success">✓ Valid</span>'
+                    : '<span class="badge app-badge is-danger">✗ Invalid</span>';
+
+                return `
+                    <div class="card mb-2 ${statusClass}">
+                        <div class="card-body p-2">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>${esc(r.filename)}</strong>
+                                    <span class="text-muted small ms-2">(${esc(r.mib_name)})</span>
+                                    ${partialBadge}
+                                </div>
+                                ${statusBadge}
+                            </div>
+                            <div class="text-muted small mt-2">
+                                <strong>Target:</strong> <code>${esc(r.target_relative_path || `${data.source_group || this.getSelectedSourceGroup()}/${r.safe_name || r.filename}`)}</code>
+                                ${r.will_replace ? '<span class="badge app-badge is-warning ms-2">Will replace</span>' : ''}
+                            </div>
+                            ${r.errors.length > 0 ? `
+                                <div class="alert alert-danger py-1 px-2 mt-2 mb-0 small">
+                                    <strong>Errors:</strong><br>${r.errors.map(esc).join('<br>')}
+                                </div>` : ''}
+                            ${r.imports.length > 0 ? `
+                                <div class="text-muted small mt-2">
+                                    <strong>Imports:</strong> ${r.imports.map(esc).join(', ')}
+                                </div>` : ''}
+                            ${hasLocalMissing ? `
+                                <div class="alert alert-warning py-1 px-2 mt-2 mb-0 small">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <strong>Missing:</strong> ${r.missing_deps.map(esc).join(', ')}
+                                </div>` : ''}
+                            ${r.partial_blockers && r.partial_blockers.length > 0 && !hasLocalMissing ? `
+                                <div class="alert alert-secondary py-1 px-2 mt-2 mb-0 small">
+                                    <i class="fas fa-layer-group"></i>
+                                    <strong>Blocked for partial compile by:</strong> ${r.partial_blockers.map(esc).join(', ')}
+                                </div>` : ''}
+                        </div>
+                    </div>`;
+            }).join('');
+
+            resultsDiv.classList.remove('d-none');
+
+            const fetchPolicy = data.dependency_fetch || {};
+            const autoFetchEnabled = !!fetchPolicy.auto_enabled;
+            const usingDefaultSources = !!fetchPolicy.using_default_sources;
+            const uploadBlockedReason = data.upload_blocked_reason || '';
+            const sourceSummary = autoFetchEnabled
+                ? (
+                    usingDefaultSources
+                        ? 'Upload will try tsmi default remote sources for the missing dependencies.'
+                        : 'Upload will try the configured remote source list from Settings.'
+                )
+                : 'Remote dependency fetch is disabled in Settings.';
+
+            if (data.global_missing_deps.length > 0) {
+                depList.innerHTML = `
+                    <p class="mb-2">The following dependencies are not available:</p>
+                    <ul class="mb-2">
+                        ${data.global_missing_deps.map(dep => `<li><code>${esc(dep)}</code></li>`).join('')}
+                    </ul>
+                    <p class="mb-0 small">
+                        <strong>Options:</strong><br>
+                        • Upload the missing MIBs in another batch<br>
+                        • Use partial compile for the ready MIBs only<br>
+                        • ${esc(sourceSummary)}
+                        ${uploadBlockedReason ? `<br>• ${esc(uploadBlockedReason)}` : ''}
+                    </p>`;
+                depAlert.classList.remove('d-none');
+            } else if (uploadBlockedReason) {
+                depList.innerHTML = `<p class="mb-0 small">${esc(uploadBlockedReason)}</p>`;
+                depAlert.classList.remove('d-none');
+            } else {
+                depAlert.classList.add('d-none');
+            }
+
+            uploadBtn.disabled = !data.can_upload;
+            uploadBtn.innerHTML = data.can_upload
+                ? (
+                    autoFetchEnabled && data.global_missing_deps.length > 0
+                        ? '<i class="fas fa-upload"></i> Upload &amp; Reload (Auto-fetch Deps)'
+                        : '<i class="fas fa-upload"></i> Upload &amp; Reload'
+                )
+                : (
+                    uploadBlockedReason
+                        ? '<i class="fas fa-ban"></i> Full Upload Blocked'
+                        : '<i class="fas fa-ban"></i> Cannot Upload (Fix Errors)'
+                );
+            uploadBtn.title = uploadBlockedReason;
+
+            const partialCompile = data.partial_compile || {};
+            if (partialCompile.can_partial_compile) {
+                partialBtn.classList.remove('d-none');
+                partialBtn.disabled = false;
+                partialBtn.innerHTML = `<i class="fas fa-layer-group"></i> Partial Compile Ready MIBs (${Number(partialCompile.ready_count) || 0})`;
+            } else {
+                partialBtn.classList.add('d-none');
+                partialBtn.disabled = true;
+            }
+
+        } catch (e) {
+            console.error('Validation error:', e);
+            alert('Validation failed: ' + e.message);
+        } finally {
+            indicator.classList.add('d-none');
+        }
+    },
+
+    uploadFiles: async function(mode = 'full') {
+        const input = document.getElementById('mib-upload-input');
+        const btn   = document.getElementById('btn-upload');
+        const partialBtn = document.getElementById('btn-upload-partial');
+        const originalText = btn.innerHTML;
+        const originalPartialText = partialBtn ? partialBtn.innerHTML : '';
+        const normalizedMode = mode === 'partial' ? 'partial' : 'full';
+        let controlsRestored = false;
+        const restoreControls = () => {
+            if (controlsRestored) return;
+            controlsRestored = true;
+            btn.innerHTML = originalText;
+            btn.disabled  = false;
+            if (partialBtn) {
+                partialBtn.innerHTML = originalPartialText;
+                partialBtn.disabled = false;
+            }
+        };
+        btn.innerHTML = normalizedMode === 'partial'
+            ? '<i class="fas fa-spinner fa-spin"></i> Partial compiling...'
+            : '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+        btn.disabled  = true;
+        if (partialBtn) {
+            partialBtn.disabled = true;
+            if (normalizedMode === 'partial') {
+                partialBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working...';
+            }
+        }
+
+        try {
+            const formData = new FormData();
+            for (let file of input.files) formData.append('files', file);
+            formData.append('compile_mode', normalizedMode);
+            formData.append('source_group', this.getSelectedSourceGroup());
+            if (normalizedMode === 'partial') {
+                const readyMibs = (this.validationState && this.validationState.partial_compile
+                    ? this.validationState.partial_compile.ready_mibs
+                    : []) || [];
+                formData.append('compile_targets', JSON.stringify(readyMibs));
+            }
+
+            const res = await fetch('/api/mibs/upload', { method: 'POST', body: formData });
+
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(`Upload failed (${res.status}): ${errorText}`);
+            }
+
+            const data = await res.json();
+
+            if (!data || !data.results || !Array.isArray(data.results)) {
+                throw new Error('Invalid response format from server');
+            }
+
+            const loaded = data.results.filter(r => r.status === 'loaded').length;
+            const skipped = data.results.filter(r => r.status === 'skipped').length;
+            const failed = data.results.filter(r => r.status === 'failed').length;
+            const errors = data.results.filter(r => r.status === 'error').length;
+
+            let message = normalizedMode === 'partial'
+                ? `Partial Compile Complete!\n\n✓ Successfully loaded: ${loaded}\n`
+                : `Upload Complete!\n\n✓ Successfully loaded: ${loaded}\n`;
+            if (data.source_group) message += `Source group: ${data.source_group}\n`;
+            if (skipped > 0) message += `➜ Skipped for now: ${skipped}\n`;
+            if (failed > 0) message += `⚠ Failed to load: ${failed}\n`;
+            if (errors > 0) message += `✗ Upload errors: ${errors}\n`;
+            if (data.dependency_fetch && data.dependency_fetch.enabled) {
+                const resolvedDeps = (data.dependency_fetch.resolved || data.dependency_fetch.downloaded || []).length;
+                const failedDeps = (data.dependency_fetch.failed || []).length;
+                message += `\nRemote dependency fetch: ${resolvedDeps} resolved`;
+                if (data.dependency_fetch.using_default_sources) {
+                    message += ' via tsmi defaults';
+                }
+                if (failedDeps > 0) message += `, ${failedDeps} failed`;
+                message += '\n';
+            }
+
+            const problemFiles = data.results.filter(r => r.status === 'failed' || r.status === 'error' || r.status === 'skipped');
+            if (problemFiles.length > 0) {
+                message += `\nDetails:\n`;
+                problemFiles.forEach(r => { message += `• ${r.filename}: ${r.error || 'Unknown error'}\n`; });
+            }
+
+            restoreControls();
+            this.uploadModal.hide();
+            alert(message);
+            this._statusCacheValid = false;
+            await this.loadStatus();
+            await this.loadTraps();
+
+        } catch (e) {
+            console.error('Upload error:', e);
+            alert('Upload failed:\n\n' + e.message);
+        } finally {
+            restoreControls();
+        }
+    },
+
+    reloadMibs: async function() {
+        const reloadBtn = document.querySelector('button[onclick*="reloadMibs"]');
+        const originalHtml = reloadBtn ? reloadBtn.innerHTML : '';
+
+        if (reloadBtn) {
+            reloadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            reloadBtn.disabled  = true;
+        }
+
+        try {
+            const res = await fetch('/api/mibs/reload', { method: 'POST' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            this._statusCacheValid = false; await this.loadStatus();
+            await this.loadTraps();
+            const resolvedDeps = data.dependency_fetch ? ((data.dependency_fetch.resolved || data.dependency_fetch.downloaded || []).length) : 0;
+            let message = `Reloaded: ${data.loaded} loaded, ${data.failed} failed`;
+            if (data.dependency_fetch && data.dependency_fetch.enabled) {
+                message += ` · remote deps ${resolvedDeps} resolved`;
+                if (data.dependency_fetch.using_default_sources) {
+                    message += ' via defaults';
+                }
+            }
+            TrishulUtils.showNotification(message, 'success');
+        } catch (e) {
+            console.error('Reload failed', e);
+            TrishulUtils.showNotification('Reload failed: ' + e.message, 'error');
+        } finally {
+            if (reloadBtn) {
+                reloadBtn.innerHTML = originalHtml;
+                reloadBtn.disabled  = false;
+            }
+        }
+    },
+
+    deleteMib: async function(filename) {
+        await this.deleteMibs([filename]);
+    },
+
+    deleteSelectedMibs: async function() {
+        await this.deleteMibs(Array.from(this.selectedMibPaths));
+    },
+
+    deleteMibs: async function(paths) {
+        const normalized = Array.from(
+            new Set(
+                (Array.isArray(paths) ? paths : [])
+                    .map(path => String(path || '').trim())
+                    .filter(Boolean)
+            )
+        );
+
+        if (normalized.length === 0) {
+            TrishulUtils.showNotification('Select at least one MIB to delete', 'warning');
+            return;
+        }
+
+        const preview = normalized.slice(0, 5).join('\n');
+        const overflowText = normalized.length > 5 ? `\n...and ${normalized.length - 5} more` : '';
+        const title = normalized.length === 1 ? `Delete ${normalized[0]}?` : `Delete ${normalized.length} MIB files?`;
+        const message = `${title}\n\n${preview}${overflowText}\n\nThis will remove the selected MIB source files and rebuild the active MIB bundle.`;
+        if (!confirm(message)) return;
+
+        normalized.forEach(path => this.deletingMibPaths.add(path));
+        this.renderMibList();
+        this.renderFailedMibs(this.currentStatus?.errors || []);
+
+        try {
+            const res = await fetch('/api/mibs/delete-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: normalized }),
+            });
+            let data = {};
+            try {
+                data = await res.json();
+            } catch (_error) {
+                data = {};
+            }
+            if (!res.ok) {
+                throw new Error(data.detail || 'Delete failed');
+            }
+
+            this.selectedMibPaths.clear();
+            this.deletingMibPaths.clear();
+            this._statusCacheValid = false;
+            await this.loadStatus();
+            await this.loadTraps();
+
+            const resolvedDeps = data.dependency_fetch ? ((data.dependency_fetch.resolved || data.dependency_fetch.downloaded || []).length) : 0;
+            const deletedCount = Number(data.deleted_count || normalized.length || 0);
+            let notification = deletedCount === 1
+                ? `Deleted ${normalized[0]}`
+                : `Deleted ${deletedCount} MIBs`;
+            if (data && data.reload_applied) {
+                notification += ` · ${Number(data.loaded || 0)} loaded, ${Number(data.failed || 0)} failed`;
+                if (data.dependency_fetch && data.dependency_fetch.enabled) {
+                    notification += ` · remote deps ${resolvedDeps} resolved`;
+                    if (data.dependency_fetch.using_default_sources) {
+                        notification += ' via defaults';
+                    }
+                }
+            }
+            TrishulUtils.showNotification(notification, 'success', 5000);
+        } catch (e) {
+            console.error('Delete failed:', e);
+            normalized.forEach(path => this.deletingMibPaths.delete(path));
+            this.renderMibList();
+            this.renderFailedMibs(this.currentStatus?.errors || []);
+            alert(`Delete failed: ${e.message}`);
+        }
+    },
+
+    getSelectedSourceGroup: function() {
+        const input = document.getElementById('mib-upload-group');
+        const value = String(input && input.value ? input.value : '').trim().replace(/\\/g, '/');
+        return value || 'common';
+    },
+
+    populateSourceGroupOptions: function(groups) {
+        const datalist = document.getElementById('mib-source-group-options');
+        if (!datalist) return;
+        const items = Array.isArray(groups) ? groups : [];
+        datalist.innerHTML = items.map(group => {
+            const name = typeof group === 'string' ? group : group.name;
+            if (!name || name === 'auto-fetched') return '';
+            return `<option value="${TrishulUtils.escapeHtml(name || '')}"></option>`;
+        }).join('');
+    },
+
+    populateMibFilterSourceGroupOptions: function(groups, mibs) {
+        const select = document.getElementById('mib-filter-source-group');
+        if (!select) return;
+
+        const previous = String(select.value || '');
+        const names = new Set();
+
+        (Array.isArray(groups) ? groups : []).forEach(group => {
+            const name = typeof group === 'string' ? group : group && group.name;
+            if (name) names.add(String(name));
+        });
+
+        (Array.isArray(mibs) ? mibs : []).forEach(mib => {
+            if (mib && mib.source_group) names.add(String(mib.source_group));
+        });
+
+        const options = ['<option value="">All source groups</option>'];
+        Array.from(names)
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b))
+            .forEach(name => {
+                options.push(`<option value="${TrishulUtils.escapeHtml(name)}">${TrishulUtils.escapeHtml(name)}</option>`);
+            });
+
+        select.innerHTML = options.join('');
+        if (previous && names.has(previous)) {
+            select.value = previous;
+        }
+    },
+
+    populateExportSourceGroupOptions: function(groups, mibs) {
+        const select = document.getElementById('mib-export-source-group');
+        if (!select) return;
+
+        const previous = String(select.value || '');
+        const names = new Set();
+
+        (Array.isArray(groups) ? groups : []).forEach(group => {
+            const name = typeof group === 'string' ? group : group && group.name;
+            if (name) names.add(String(name));
+        });
+
+        (Array.isArray(mibs) ? mibs : []).forEach(mib => {
+            if (mib && mib.source_group) names.add(String(mib.source_group));
+        });
+
+        const options = ['<option value="">All active MIBs</option>'];
+        Array.from(names)
+            .filter(name => name && name !== 'auto-fetched')
+            .sort((a, b) => a.localeCompare(b))
+            .forEach(name => {
+                options.push(`<option value="${TrishulUtils.escapeHtml(name)}">${TrishulUtils.escapeHtml(name)}</option>`);
+            });
+
+        select.innerHTML = options.join('');
+        if (previous && names.has(previous)) {
+            select.value = previous;
+        }
+    },
+
+    exportCatalog: async function(format = 'json', options = {}) {
+        const payload = {
+            format: format === 'csv' ? 'csv' : 'json',
+            modules: Array.isArray(options.modules) ? options.modules : [],
+            notifications: Array.isArray(options.notifications) ? options.notifications : [],
+            source_groups: Array.isArray(options.source_groups) ? options.source_groups : [],
+            export_type: String(options.export_type || 'catalog'),
+        };
+
+        try {
+            const res = await fetch('/api/mibs/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(errorText || `Export failed (${res.status})`);
+            }
+            const blob = await res.blob();
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename="([^"]+)"/);
+            const filename = match ? match[1] : `trishul-mib-catalog.${payload.format === 'csv' ? 'zip' : 'json'}`;
+            this.triggerDownload(blob, filename);
+            TrishulUtils.showNotification(`Catalog export ready: ${filename}`, 'success');
+        } catch (e) {
+            console.error('Catalog export failed:', e);
+            TrishulUtils.showNotification(`Catalog export failed: ${e.message}`, 'error', 5000);
+        }
+    },
+
+    exportScopedCatalog: async function(format = 'json') {
+        const groupSelect = document.getElementById('mib-export-source-group');
+        const typeSelect = document.getElementById('mib-export-type');
+        const selectedGroup = String(groupSelect && groupSelect.value ? groupSelect.value : '').trim();
+        const exportType = String(typeSelect && typeSelect.value ? typeSelect.value : 'catalog').trim();
+
+        await this.exportCatalog(format, {
+            export_type: exportType || 'catalog',
+            source_groups: selectedGroup ? [selectedGroup] : [],
+        });
+    },
+
+    exportTrapCatalog: async function(format = 'json') {
+        await this.exportCatalog(format, {
+            export_type: 'notifications',
+        });
+    },
+
+    exportCurrentTrap: async function(format = 'json') {
+        if (!this.currentTrapData) {
+            TrishulUtils.showNotification('No trap selected for export', 'warning');
+            return;
+        }
+        await this.exportCatalog(format, {
+            export_type: 'notifications',
+            notifications: [this.currentTrapData.full_name || this.currentTrapData.name || this.currentTrapData.oid],
+        });
+    },
+
+    triggerDownload: function(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    },
+
+    showDependencyHelp: function() {
+        alert(
+            'How to resolve missing dependencies:\n\n' +
+            '1. Upload the missing MIBs manually using this dialog\n' +
+            '2. Or use partial compile for the ready MIBs only\n' +
+            '3. Reload after the dependencies are available\n\n' +
+            'Validation never performs remote fetches. Auto-fetch, if enabled in Settings, only runs during upload/reload.'
+        );
+    },
+
+    fetchDependenciesFromElement: async function(button) {
+        const deps = TrishulUtils.decodeDataAttr(button?.dataset?.deps || '', []);
+        await this.fetchDependencies(deps);
+    },
+
+    fetchDependenciesFromValidation: async function() {
+        const button = document.getElementById('btn-fetch-dependencies');
+        const deps = TrishulUtils.decodeDataAttr(button?.dataset?.deps || '', []);
+        await this.fetchDependencies(deps);
+    },
+
+    fetchDependencies: async function(dependencies) {
+        const deps = Array.isArray(dependencies) ? dependencies.filter(Boolean) : [];
+        if (deps.length === 0) {
+            TrishulUtils.showNotification('No missing dependencies to fetch', 'warning');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/mibs/fetch-dependencies', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dependencies: deps, reload_after_fetch: true })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.detail || 'Dependency fetch failed');
+            }
+
+            const downloaded = (data.downloaded || []).length;
+            const cached = (data.cached || []).length;
+            const failed = (data.failed || []).length;
+            let message = `Dependency fetch complete: ${downloaded} downloaded`;
+            if (cached > 0) message += `, ${cached} cached`;
+            if (failed > 0) message += `, ${failed} failed`;
+            TrishulUtils.showNotification(message, failed > 0 ? 'warning' : 'success', 5000);
+            this._statusCacheValid = false; await this.loadStatus();
+            await this.loadTraps();
+            const input = document.getElementById('mib-upload-input');
+            if (input && input.files && input.files.length > 0) {
+                await this.validateFiles();
+            }
+        } catch (e) {
+            console.error('Dependency fetch failed:', e);
+            TrishulUtils.showNotification(`Dependency fetch failed: ${e.message}`, 'error', 5000);
+        }
+    }
+
+};

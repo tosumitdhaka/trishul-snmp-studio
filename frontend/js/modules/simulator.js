@@ -1,0 +1,812 @@
+window.SimulatorModule = {
+    _listeners: [],
+    lastSavedJson: '{}',
+    filteredLogs: [],
+    _statusPollTimer: null,
+    _logPollTimer: null,
+    _statusPollInFlight: false,
+    _logPollInFlight: false,
+    _lastLogSignature: '',
+
+    init: function() {
+        this.destroy();
+
+        if (!window.AppState) {
+            window.AppState = {};
+        }
+
+        const currentStateLogs = Array.isArray(window.AppState.logs) ? window.AppState.logs : [];
+        const storedLogs = currentStateLogs.length > 0
+            ? currentStateLogs
+            : this.loadLogsFromStorage();
+        window.AppState.logs = storedLogs
+            .map(entry => this.normalizeLogEntry(entry))
+            .filter(Boolean);
+
+        this.renderLogs(window.AppState.logs, true);
+
+        if (window.AppState.simulator) {
+            this.updateUI(window.AppState.simulator);
+        } else {
+            this.setButtons(false);
+        }
+
+        this.loadCustomData();
+        this.attachEditorEvents();
+        this.updateLogStats();
+
+        // Replace 10s setInterval with WS event listeners
+        this._registerListeners();
+
+        // REST seed: populates UI before the first WS push arrives
+        this.fetchStatus();
+        this.loadLogs(true);
+        this._startPollingFallback();
+    },
+
+    destroy: function() {
+        this._listeners.forEach(function(pair) {
+            window.removeEventListener(pair[0], pair[1]);
+        });
+        this._listeners = [];
+        this._stopPollingFallback();
+    },
+
+    _on: function(type, fn) {
+        window.addEventListener(type, fn);
+        this._listeners.push([type, fn]);
+    },
+
+    _registerListeners: function() {
+        var self = this;
+
+        // Full simulator state pushed on every WS (re)connect
+        this._on('trishul:ws:full_state', function(e) {
+            if (e.detail && e.detail.simulator) {
+                window.AppState.simulator = e.detail.simulator;
+                self.updateUI(e.detail.simulator);
+            }
+        });
+
+        // Lightweight push on start / stop / restart lifecycle changes
+        this._on('trishul:ws:status', function(e) {
+            if (e.detail && e.detail.simulator) {
+                window.AppState.simulator = e.detail.simulator;
+                self.updateUI(e.detail.simulator);
+            }
+        });
+
+        this._on('trishul:simulator-log-updated', function() {
+            const hasActiveFilter = (document.getElementById('log-search')?.value || '').trim()
+                || ((document.getElementById('log-filter')?.value || 'all') !== 'all');
+            if (hasActiveFilter) {
+                self.filterLogs();
+                return;
+            }
+            self.renderLogs(window.AppState.logs || [], true);
+            self.updateLogStats();
+        });
+
+        // REST re-seed after WS reconnect
+        this._on('trishul:ws:open', function() {
+            self._stopPollingFallback();
+            self.fetchStatus();
+            self.loadLogs(true);
+        });
+
+        this._on('trishul:ws:close', function() {
+            self._startPollingFallback();
+        });
+    },
+
+    _startPollingFallback: function() {
+        var self = this;
+
+        this._stopPollingFallback();
+        if (window.WsClient && typeof window.WsClient.isConnected === 'function' && window.WsClient.isConnected()) {
+            return;
+        }
+
+        this._statusPollTimer = window.setInterval(function() {
+            if (self._statusPollInFlight) return;
+            self._statusPollInFlight = true;
+            Promise.resolve(self.fetchStatus()).finally(function() {
+                self._statusPollInFlight = false;
+            });
+        }, 4000);
+
+        this._logPollTimer = window.setInterval(function() {
+            if (self._logPollInFlight) return;
+            self._logPollInFlight = true;
+            Promise.resolve(self.loadLogs(true)).finally(function() {
+                self._logPollInFlight = false;
+            });
+        }, 1500);
+    },
+
+    _stopPollingFallback: function() {
+        if (this._statusPollTimer) {
+            clearInterval(this._statusPollTimer);
+            this._statusPollTimer = null;
+        }
+        if (this._logPollTimer) {
+            clearInterval(this._logPollTimer);
+            this._logPollTimer = null;
+        }
+        this._statusPollInFlight = false;
+        this._logPollInFlight = false;
+    },
+
+    // ==================== Log Persistence ====================
+
+    loadLogsFromStorage: function() {
+        try {
+            const stored = localStorage.getItem('trishul_simulator_logs');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                if (Array.isArray(parsed)) {
+                    return parsed;
+                }
+            }
+        } catch (e) {
+            console.error('Failed to load logs from storage:', e);
+        }
+        return [];
+    },
+
+    saveLogsToStorage: function() {
+        try {
+            // Keep only last 500 logs in storage
+            const logsToSave = window.AppState.logs.slice(-500);
+            localStorage.setItem('trishul_simulator_logs', JSON.stringify(logsToSave));
+        } catch (e) {
+            console.error('Failed to save logs to storage:', e);
+        }
+    },
+
+    clearStoredLogs: function() {
+        try {
+            localStorage.removeItem('trishul_simulator_logs');
+        } catch (e) {
+            console.error('Failed to clear logs from storage:', e);
+        }
+    },
+
+    decodeEscapedHtml: function(value) {
+        return String(value || '')
+            .replace(/&quot;/g, '"')
+            .replace(/&#0?39;/g, "'")
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&amp;/g, '&');
+    },
+
+    stripHtmlTags: function(value) {
+        return String(value || '')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    },
+
+    normalizeLogEntry: function(entry) {
+        if (!entry) return null;
+
+        if (typeof entry === 'object') {
+            const fallbackTime = String(entry.time || '');
+            const normalized = {
+                time: fallbackTime || new Date().toLocaleTimeString(),
+                level: String(entry.level || 'info'),
+                message: String(entry.message || ''),
+            };
+
+            if (entry.request_type) {
+                normalized.request_type = String(entry.request_type).toUpperCase();
+            }
+            if (entry.first_requested_oid) {
+                normalized.first_requested_oid = String(entry.first_requested_oid);
+            }
+            if (entry.first_returned_oid) {
+                normalized.first_returned_oid = String(entry.first_returned_oid);
+            }
+            if (entry.timestamp) {
+                normalized.timestamp = String(entry.timestamp);
+            }
+            if (entry.last_event_timestamp) {
+                normalized.last_event_timestamp = String(entry.last_event_timestamp);
+            }
+            if (Array.isArray(entry.requested_oids)) {
+                normalized.requested_oids = entry.requested_oids.map(item => String(item));
+            }
+            if (Array.isArray(entry.returned_oids)) {
+                normalized.returned_oids = entry.returned_oids.map(item => String(item));
+            }
+
+            const oidCount = Number(entry.oid_count);
+            if (Number.isFinite(oidCount) && oidCount >= 0) {
+                normalized.oid_count = oidCount;
+            }
+
+            const requestCount = Number(entry.request_count);
+            if (Number.isFinite(requestCount) && requestCount > 0) {
+                normalized.request_count = requestCount;
+            }
+
+            if (window.TrishulUtils && typeof TrishulUtils.formatClockTime === 'function') {
+                normalized.time = TrishulUtils.formatClockTime(
+                    normalized.last_event_timestamp || normalized.timestamp || fallbackTime,
+                    fallbackTime
+                );
+            }
+
+            return normalized;
+        }
+
+        if (typeof entry === 'string') {
+            const levelMatch = entry.match(/data-level="([^"]*)"/);
+            const textMatch = entry.match(/data-text="([^"]*)"/);
+            const timeMatch = entry.match(/\[([^\]]+)\]/);
+            const fallbackText = this.stripHtmlTags(entry).replace(/^\[[^\]]+\]\s*/, '').trim();
+
+            return {
+                time: window.TrishulUtils && typeof TrishulUtils.formatClockTime === 'function'
+                    ? TrishulUtils.formatClockTime(
+                        timeMatch ? this.decodeEscapedHtml(timeMatch[1]) : '',
+                        this.decodeEscapedHtml(timeMatch ? timeMatch[1] : '')
+                    )
+                    : (timeMatch ? this.decodeEscapedHtml(timeMatch[1]) : new Date().toLocaleTimeString()),
+                level: this.decodeEscapedHtml(levelMatch ? levelMatch[1] : 'info'),
+                message: this.decodeEscapedHtml(textMatch ? textMatch[1] : fallbackText),
+            };
+        }
+
+        return null;
+    },
+
+    buildLogHtml: function(entry) {
+        const esc = TrishulUtils.escapeHtml;
+        const level = entry.level || 'info';
+        const message = String(entry.message || '');
+        const time = String(entry.time || '');
+        const requestedOids = Array.isArray(entry.requested_oids) ? entry.requested_oids : [];
+        const returnedOids = Array.isArray(entry.returned_oids) ? entry.returned_oids : [];
+        const requestCount = Number(entry.request_count) || 0;
+
+        let icon  = 'fa-info-circle';
+        let color = 'app-header-icon is-neutral';
+
+        if (level === 'success') {
+            icon  = 'fa-check-circle';
+            color = 'app-header-icon is-success';
+        } else if (level === 'error') {
+            icon  = 'fa-exclamation-circle';
+            color = 'app-header-icon is-danger';
+        } else if (level === 'warning') {
+            icon  = 'fa-exclamation-triangle';
+            color = 'app-header-icon is-warning';
+        }
+
+        const detailParts = [];
+        if (requestCount <= 1 && requestedOids.length > 0) {
+            const preview = requestedOids.slice(0, 2).join(', ');
+            detailParts.push(`Requested: ${preview}${requestedOids.length > 2 ? ` (+${requestedOids.length - 2})` : ''}`);
+        }
+        if (requestCount <= 1 && returnedOids.length > 0) {
+            const preview = returnedOids.slice(0, 2).join(', ');
+            detailParts.push(`Returned: ${preview}${returnedOids.length > 2 ? ` (+${returnedOids.length - 2})` : ''}`);
+        }
+
+        return `
+            <div class="border-bottom py-2 px-2 log-entry" data-level="${esc(level)}" data-text="${esc(message)}">
+                <div>
+                    <span class="text-muted small">[${esc(time)}]</span>
+                    <i class="fas ${icon} ${color} ms-2"></i>
+                    <span class="ms-2">${esc(message)}</span>
+                </div>
+                ${detailParts.length > 0 ? `
+                    <div class="small text-muted mt-1 ms-4">${esc(detailParts.join(' | '))}</div>
+                ` : ''}
+            </div>
+        `;
+    },
+
+    coalesceLogEntries: function(entries) {
+        if (!Array.isArray(entries) || entries.length === 0) return [];
+
+        const canBatch = typeof window.shouldBatchSimulatorLog === 'function'
+            && typeof window.batchSimulatorLogEntries === 'function';
+        if (!canBatch) {
+            return entries.slice();
+        }
+
+        return entries.reduce((acc, entry) => {
+            const previous = acc.length > 0 ? acc[acc.length - 1] : null;
+            if (previous && window.shouldBatchSimulatorLog(previous, entry)) {
+                acc[acc.length - 1] = window.batchSimulatorLogEntries(previous, entry);
+                return acc;
+            }
+            acc.push(entry);
+            return acc;
+        }, []);
+    },
+
+    renderLogs: function(entries, scrollToBottom) {
+        const area = document.getElementById('sim-log-area');
+        if (!area) return;
+
+        const userSelection = window.getSelection ? String(window.getSelection() || '').trim() : '';
+        if (userSelection) {
+            return;
+        }
+
+        if (!Array.isArray(entries) || entries.length === 0) {
+            area.innerHTML = TrishulUtils.buildPanelPlaceholder({
+                icon: 'fa-wave-square',
+                title: 'Waiting for activity',
+                copy: 'Live simulator requests and summaries will appear here.',
+                compact: true,
+            });
+            return;
+        }
+
+        area.innerHTML = entries.map(entry => this.buildLogHtml(entry)).join('');
+        if (scrollToBottom) {
+            area.scrollTop = area.scrollHeight;
+        }
+    },
+
+    getLogSignature: function(entries) {
+        if (!Array.isArray(entries) || entries.length === 0) return '';
+        return JSON.stringify(entries.map(entry => ({
+            time: entry.time || '',
+            level: entry.level || '',
+            message: entry.message || '',
+            timestamp: entry.timestamp || '',
+            last_event_timestamp: entry.last_event_timestamp || '',
+            request_type: entry.request_type || '',
+            request_count: entry.request_count || 0,
+            oid_count: entry.oid_count || 0,
+            first_requested_oid: entry.first_requested_oid || '',
+            first_returned_oid: entry.first_returned_oid || '',
+        })));
+    },
+
+    appendLogEntry: function(entry, scrollToBottom) {
+        const normalized = this.normalizeLogEntry(entry);
+        if (!normalized) return;
+
+        window.AppState.logs.push(normalized);
+        if (window.AppState.logs.length > 500) window.AppState.logs.shift();
+
+        this.saveLogsToStorage();
+
+        const hasActiveFilter = (document.getElementById('log-search')?.value || '').trim()
+            || ((document.getElementById('log-filter')?.value || 'all') !== 'all');
+
+        if (hasActiveFilter) {
+            this.filterLogs();
+            return;
+        }
+
+        this.renderLogs(window.AppState.logs, scrollToBottom);
+        this.updateLogStats();
+    },
+
+    attachEditorEvents: function() {
+        const editor = document.getElementById('custom-data-editor');
+        const unsaved = document.getElementById('unsaved-indicator');
+        const jsonError = document.getElementById('json-error-indicator');
+
+        if (!editor) return;
+
+        editor.addEventListener('input', () => {
+            const current = editor.value;
+            // Unsaved indicator
+            if (current.trim() !== this.lastSavedJson.trim()) {
+                unsaved && unsaved.classList.remove('d-none');
+            } else {
+                unsaved && unsaved.classList.add('d-none');
+            }
+
+            // JSON validation (soft)
+            try {
+                if (current.trim()) {
+                    JSON.parse(current);
+                    jsonError && jsonError.classList.add('d-none');
+                    editor.classList.remove('is-invalid');
+                } else {
+                    jsonError && jsonError.classList.add('d-none');
+                    editor.classList.remove('is-invalid');
+                }
+            } catch (e) {
+                jsonError && jsonError.classList.remove('d-none');
+                editor.classList.add('is-invalid');
+            }
+        });
+    },
+
+    beforeUnloadHandler: function(e) {
+        const editor = document.getElementById('custom-data-editor');
+        if (!editor) return;
+        if (editor.value.trim() !== SimulatorModule.lastSavedJson.trim()) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    },
+
+    loadCustomData: async function() {
+        const editor = document.getElementById('custom-data-editor');
+        if (!editor) return;
+
+        try {
+            const res = await fetch('/api/simulator/data');
+            if (!res.ok) {
+                throw new Error(await this.readErrorMessage(res, `HTTP ${res.status}`));
+            }
+            const data = await res.json();
+            const pretty = JSON.stringify(data, null, 2);
+            editor.value = pretty;
+            this.lastSavedJson = pretty;
+            window.addEventListener('beforeunload', this.beforeUnloadHandler);
+        } catch (e) {
+            console.error('Failed to load custom data:', e);
+            const fallback = '{}';
+            editor.value = fallback;
+            this.lastSavedJson = fallback;
+        }
+    },
+
+    saveCustomData: async function() {
+        const editor = document.getElementById('custom-data-editor');
+        const unsaved = document.getElementById('unsaved-indicator');
+        const jsonError = document.getElementById('json-error-indicator');
+        const content = editor.value;
+
+        try {
+            const json = JSON.parse(content);
+
+            const res = await fetch('/api/simulator/data', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(json)
+            });
+
+            if (!res.ok) {
+                throw new Error(await this.readErrorMessage(res, `HTTP ${res.status}`));
+            }
+
+            const data = await res.json();
+
+            this.lastSavedJson = content;
+            unsaved && unsaved.classList.add('d-none');
+            jsonError && jsonError.classList.add('d-none');
+            editor.classList.remove('is-invalid');
+
+            this.log(`Custom data saved: ${data.message}`, 'success');
+            this.showToast('Custom data saved successfully');
+        } catch (e) {
+            console.error('Save error:', e);
+            this.log('Failed to save custom data: ' + e.message, 'error');
+            this.showToast('Failed to save custom data: ' + e.message, 'error');
+        }
+    },
+
+    formatJson: function() {
+        const editor = document.getElementById('custom-data-editor');
+        try {
+            const current = editor.value;
+            if (!current.trim()) return;
+            const parsed = JSON.parse(current);
+            const pretty = JSON.stringify(parsed, null, 2);
+            editor.value = pretty;
+            this.log('JSON formatted successfully', 'success');
+        } catch (e) {
+            this.showToast('Invalid JSON: ' + e.message, 'error');
+        }
+    },
+
+    start: async function() {
+        const port = document.getElementById('sim-config-port').value;
+        const comm = document.getElementById('sim-config-comm').value;
+
+        this.log(`Starting simulator on Port ${port}...`);
+
+        try {
+            const res = await fetch('/api/simulator/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ port: parseInt(port), community: comm })
+            });
+
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            
+            if (data.status === 'started') {
+                this.log(data.message || 'Simulator started successfully', 'success');
+                this.showToast(data.message || 'Simulator started successfully', 'success');
+            } else if (data.status === 'already_running') {
+                this.log(data.message || 'Simulator is already running', 'warning');
+                this.showToast(data.message || 'Simulator is already running', 'warning');
+            }
+            
+            // WS status push will update the UI; this call is a fallback
+            // for the rare case the WS message races with the REST response.
+            this.fetchStatus();
+        } catch (e) {
+            console.error('Start error:', e);
+            this.log('Failed to start simulator: ' + e.message, 'error');
+            this.showToast('Failed to start simulator: ' + e.message, 'error');
+        }
+    },
+
+    stop: async function() {
+        this.log('Stopping simulator...');
+        try {
+            const res = await fetch('/api/simulator/stop', { method: 'POST' });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            this.log(data.message || 'Simulator stopped successfully', 'success');
+            this.showToast(data.message || 'Simulator stopped successfully', 'info');
+            this.fetchStatus();
+        } catch (e) {
+            console.error('Stop error:', e);
+            this.log('Failed to stop simulator: ' + e.message, 'error');
+            this.showToast('Failed to stop simulator: ' + e.message, 'error');
+        }
+    },
+
+    restart: async function() {
+        this.log('Restarting simulator...');
+        try {
+            const res = await fetch('/api/simulator/restart', { method: 'POST' });
+            if (!res.ok) {
+                throw new Error(`HTTP ${res.status}`);
+            }
+
+            const data = await res.json();
+            this.log(data.message || 'Simulator restarted successfully', 'success');
+            this.showToast(data.message || 'Simulator restarted successfully', 'success');
+            this.fetchStatus();
+        } catch (e) {
+            console.error('Restart error:', e);
+            this.log('Failed to restart simulator: ' + e.message, 'error');
+            this.showToast('Failed to restart simulator: ' + e.message, 'error');
+        }
+    },
+
+    fetchStatus: async function() {
+        try {
+            const res = await fetch('/api/simulator/status');
+            if (!res.ok) return;
+            const data = await res.json();
+
+            window.AppState.simulator = data;
+            this.updateUI(data);
+        } catch (e) {
+            console.error('Sim status error', e);
+            this.log('Error fetching simulator status: ' + e.message, 'error');
+        }
+    },
+
+    loadLogs: async function(replaceExisting) {
+        try {
+            const res = await fetch('/api/simulator/logs?limit=200');
+            if (!res.ok) return;
+            const data = await res.json();
+            const items = Array.isArray(data.items) ? data.items : [];
+            const normalized = this.coalesceLogEntries(items
+                .map(entry => this.normalizeLogEntry(entry))
+                .filter(Boolean));
+            const nextSignature = this.getLogSignature(normalized);
+
+            if (replaceExisting) {
+                if (nextSignature === this._lastLogSignature) {
+                    return;
+                }
+                window.AppState.logs = normalized;
+                this._lastLogSignature = nextSignature;
+            } else {
+                window.AppState.logs = this.coalesceLogEntries((window.AppState.logs || []).concat(normalized));
+                this._lastLogSignature = this.getLogSignature(window.AppState.logs);
+            }
+
+            this.saveLogsToStorage();
+
+            const hasActiveFilter = (document.getElementById('log-search')?.value || '').trim()
+                || ((document.getElementById('log-filter')?.value || 'all') !== 'all');
+            if (hasActiveFilter) {
+                this.filterLogs();
+            } else {
+                this.renderLogs(window.AppState.logs || [], true);
+                this.updateLogStats();
+            }
+        } catch (e) {
+            console.error('Failed to load simulator logs:', e);
+        }
+    },
+
+    updateUI: function(data) {
+        const badge      = document.getElementById('sim-badge');
+        const stateText  = document.getElementById('sim-state-text');
+        const detailText = document.getElementById('sim-detail-text');
+        const iconWrapper = document.getElementById('sim-icon-wrapper');
+        const metrics    = document.getElementById('sim-metrics');
+        const uptimeEl   = document.getElementById('sim-uptime');
+        const reqEl      = document.getElementById('sim-requests');
+        const lastActEl  = document.getElementById('sim-last-activity');
+        const configHint = document.getElementById('config-hint');
+        const configDisabledHint = document.getElementById('config-disabled-hint');
+        const portInput  = document.getElementById('sim-config-port');
+        const commInput  = document.getElementById('sim-config-comm');
+        const esc = TrishulUtils.escapeHtml;
+
+        if (!badge || !stateText || !detailText) return;
+
+        if (data.running) {
+            TrishulUtils.setStatusBadgeState(badge, 'running', 'RUNNING');
+            TrishulUtils.setStatusTextState(stateText, 'online', 'Online', 'mb-0');
+            if (iconWrapper) {
+                TrishulUtils.setAccentBoxTone(iconWrapper, 'success', 'me-3');
+            }
+            detailText.innerHTML = `Listening on <strong>UDP ${Number(data.port) || '--'}</strong> <br> Community: <code>${esc(data.community || '')}</code> <br> PID: ${Number(data.pid) || '--'}`;
+
+            this.setButtons(true);
+
+            if (portInput) {
+                portInput.value = data.port;
+                portInput.disabled = true;
+            }
+            if (commInput) {
+                commInput.value = data.community;
+                commInput.disabled = true;
+            }
+
+            configHint && configHint.classList.add('d-none');
+            configDisabledHint && configDisabledHint.classList.remove('d-none');
+
+            if (metrics && uptimeEl && reqEl && lastActEl) {
+                metrics.classList.remove('d-none');
+                // uptime_seconds (int) → compact human duration via TrishulUtils
+                uptimeEl.textContent  = TrishulUtils.formatUptime(data.uptime_seconds);
+                // requests: populated from stats_store.simulator.snmp_requests_served
+                reqEl.textContent     = data.requests ?? 0;
+                // last_activity: ISO ts from stats_store → relative time via TrishulUtils
+                lastActEl.textContent = TrishulUtils.formatRelativeTime(data.last_activity);
+            }
+        } else {
+            TrishulUtils.setStatusBadgeState(badge, 'stopped', 'STOPPED');
+            TrishulUtils.setStatusTextState(stateText, 'stopped', 'Offline', 'mb-0');
+            if (iconWrapper) {
+                TrishulUtils.setAccentBoxTone(iconWrapper, 'neutral', 'me-3');
+            }
+            detailText.textContent = 'Service is stopped.';
+
+            this.setButtons(false);
+
+            if (portInput) {
+                portInput.disabled = false;
+            }
+            if (commInput) {
+                commInput.disabled = false;
+            }
+
+            configDisabledHint && configDisabledHint.classList.add('d-none');
+            if (portInput && commInput && (portInput.value || commInput.value)) {
+                configHint && configHint.classList.add('d-none');
+            }
+
+            if (metrics) {
+                metrics.classList.add('d-none');
+            }
+        }
+    },
+
+    setButtons: function(isRunning) {
+        const btnStart   = document.getElementById('btn-start');
+        const btnStop    = document.getElementById('btn-stop');
+        const btnRestart = document.getElementById('btn-restart');
+
+        if (!btnStart || !btnStop || !btnRestart) return;
+
+        btnStart.disabled   = isRunning;
+        btnStop.disabled    = !isRunning;
+        btnRestart.disabled = !isRunning;
+    },
+
+    log: function(msg, type = 'info', time) {
+        this.appendLogEntry({
+            time: time || new Date().toLocaleTimeString(),
+            level: type,
+            message: String(msg || ''),
+        }, true);
+    },
+
+    clearLog: function() {
+        fetch('/api/simulator/logs', { method: 'DELETE' })
+            .catch((e) => console.error('Failed to clear backend simulator logs:', e))
+            .finally(() => {
+                window.AppState.logs = [];
+                this._lastLogSignature = '';
+                this.clearStoredLogs();
+                this.renderLogs([]);
+                this.updateLogStats();
+            });
+    },
+
+    exportLog: function() {
+        const blob = new Blob([this.getPlainLogText()], { type: 'text/plain;charset=utf-8' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.createElement('a');
+        a.href     = url;
+        a.download = `trishul-simulator-log-${new Date().toISOString()}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+    },
+
+    getPlainLogText: function() {
+        return (window.AppState.logs || []).map(entry => {
+            const normalized = this.normalizeLogEntry(entry);
+            return normalized ? `[${normalized.time}] ${normalized.message}` : '';
+        }).filter(Boolean).join('\n');
+    },
+
+    filterLogs: function() {
+        const searchInput  = document.getElementById('log-search');
+        const filterSelect = document.getElementById('log-filter');
+        const area         = document.getElementById('sim-log-area');
+
+        if (!area) return;
+
+        const searchTerm = (searchInput?.value || '').toLowerCase();
+        const level      = filterSelect?.value || 'all';
+
+        const filtered = (window.AppState.logs || []).map(entry => this.normalizeLogEntry(entry)).filter(entry => {
+            if (!entry) return false;
+            const matchesLevel  = level === 'all' || entry.level === level;
+            const matchesSearch = !searchTerm || entry.message.toLowerCase().includes(searchTerm);
+            return matchesLevel && matchesSearch;
+        });
+
+        this.renderLogs(filtered, true);
+        if (filtered.length === 0) {
+            area.innerHTML = '<div class="text-muted small p-2">No log entries match current filter.</div>';
+        }
+        this.updateLogStats(filtered.length);
+    },
+
+    updateLogStats: function(filteredCount) {
+        const stats = document.getElementById('log-stats');
+        const total   = window.AppState.logs ? window.AppState.logs.length : 0;
+        const current = typeof filteredCount === 'number' ? filteredCount : total;
+
+        if (stats) {
+            stats.textContent = `${current} entries${current !== total ? ` (of ${total})` : ''}`;
+        }
+    },
+
+    readErrorMessage: async function(response, fallback) {
+        try {
+            const contentType = response.headers.get('content-type') || '';
+            if (contentType.includes('application/json')) {
+                const payload = await response.json();
+                if (payload && payload.detail) return String(payload.detail);
+                if (payload && payload.message) return String(payload.message);
+            } else {
+                const text = (await response.text()).trim();
+                if (text) return text;
+            }
+        } catch (e) {
+            console.error('Failed to read simulator error response:', e);
+        }
+        return fallback;
+    },
+
+    showToast: function(message, type = 'success') {
+        TrishulUtils.showNotification(message, type, 4000);
+    }
+};

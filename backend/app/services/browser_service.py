@@ -1,0 +1,404 @@
+from __future__ import annotations
+
+from typing import Any
+
+from trishul_snmp import MibBundle
+from trishul_snmp.errors import UnknownOidError, UnknownSymbolError
+from trishul_snmp.mib.models import MibNode
+from trishul_snmp.mib.registry import oid_to_string, parse_oid
+
+
+def _normalize_optional_filter(value: str | None) -> str | None:
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _ui_type(node: MibNode) -> str:
+    """Map MIB object_type/nodetype to the UI type label the frontend expects."""
+    ot = (node.object_type or "").strip().upper()
+    nt = (node.nodetype or "").strip().lower()
+    if ot in ("NOTIFICATION-TYPE", "TRAP-TYPE"):
+        return "NotificationType"
+    if ot == "OBJECT-GROUP":
+        return "ObjectGroup"
+    if ot == "MODULE-COMPLIANCE":
+        return "ModuleCompliance"
+    if ot == "MODULE-IDENTITY":
+        return "ModuleCompliance"  # closest visual match
+    if nt == "table":
+        return "MibTable"
+    if nt == "row":
+        return "MibTableRow"
+    if nt == "column":
+        return "MibTableColumn"
+    if nt == "scalar":
+        return "MibScalar"
+    # OBJECT-TYPE with no nodetype, OBJECT IDENTIFIER, etc.
+    return ot or nt or "Node"
+
+
+def _node_to_record(node: MibNode) -> dict[str, Any]:
+    oid_str = oid_to_string(node.oid) if node.oid else ""
+    return {
+        "entry_type": "notification" if node.object_type in ("NOTIFICATION-TYPE", "TRAP-TYPE") else "object",
+        "name": node.name,
+        "full_name": f"{node.module}::{node.name}",
+        "module": node.module,
+        "oid": oid_str,
+        "oid_tuple": node.oid,
+        "type": _ui_type(node),
+        "syntax": node.syntax,
+        "access": node.max_access,
+        "status": node.status,
+        "description": node.description or "",
+        "indexes": list(node.index or []),
+        "members": [
+            {"module": m.module, "name": m.object}
+            for m in (node.members or [])
+        ],
+        "constraints": node.constraints,
+    }
+
+
+def resolve(value: str, *, mode: str = "numeric", bundle: MibBundle | None) -> dict[str, Any]:
+    if bundle is None:
+        return {"input": value, "output": value, "resolved": False}
+    normalized = value.strip()
+    if not normalized:
+        return {"input": value, "output": value, "resolved": False}
+
+    # Try symbolic MODULE::symbol resolution
+    if "::" in normalized:
+        try:
+            oid_tuple = bundle.resolve(normalized)
+            if mode == "symbolic":
+                output = normalized
+            else:
+                output = oid_to_string(oid_tuple)
+            return {"input": value, "output": output, "resolved": True}
+        except (UnknownSymbolError, UnknownOidError):
+            pass
+
+    # Try numeric OID lookup
+    try:
+        match = bundle.lookup(normalized)
+        if mode == "symbolic":
+            output = bundle.display_symbolic_from_match(match)
+        else:
+            output = oid_to_string(match.oid)
+        return {"input": value, "output": output, "resolved": True}
+    except (UnknownOidError, Exception):
+        pass
+
+    # Try name-only search fallback
+    results = bundle.search(normalized, limit=1)
+    if results:
+        node = results[0]
+        oid_str = oid_to_string(node.oid)
+        if mode == "symbolic":
+            output = f"{node.module}::{node.name}"
+        else:
+            output = oid_str
+        return {"input": value, "output": output, "resolved": True}
+
+    return {"input": value, "output": value, "resolved": False}
+
+
+def get_modules(*, bundle: MibBundle | None) -> dict[str, Any]:
+    if bundle is None:
+        return {"modules": []}
+    modules = []
+    for mod_name, mod_record in bundle.modules.items():
+        notif_count = len(mod_record.notifications)
+        obj_count = len(mod_record.objects)
+        modules.append({
+            "name": mod_name,
+            "objects": obj_count,
+            "notifications": notif_count,
+        })
+    modules.sort(key=lambda m: m["name"])
+    return {"modules": modules}
+
+
+def _build_children_by_parent(
+    nodes: list,
+) -> dict[tuple, list]:
+    """Map each OID tuple to its direct children (one arc deeper)."""
+    oid_set = {n.oid for n in nodes}
+    children: dict[tuple, list] = {}
+    for node in nodes:
+        parent = node.oid[:-1]
+        # Walk up to find the nearest parent that is also in the node set
+        while parent and parent not in oid_set:
+            parent = parent[:-1]
+        children.setdefault(parent, []).append(node)
+    return children
+
+
+def get_module_tree(
+    *,
+    module: str | None,
+    type_filter: str | None,
+    bundle: MibBundle | None,
+) -> dict[str, Any]:
+    module = _normalize_optional_filter(module)
+    type_filter = _normalize_optional_filter(type_filter)
+    if bundle is None:
+        return {"modules": [], "count": 0}
+
+    mod_names = [module] if module else sorted(bundle.modules.keys())
+    result_modules = []
+    for mod_name in mod_names:
+        nodes = list(bundle.iter_objects(module=mod_name))
+        nodes += list(bundle.iter_notifications(module=mod_name))
+        if type_filter:
+            nodes = [n for n in nodes if _ui_type(n) == type_filter]
+        if not nodes:
+            continue
+        nodes.sort(key=lambda n: n.oid)
+
+        oid_set = {n.oid for n in nodes}
+        children_by_parent = _build_children_by_parent(nodes)
+
+        # Top-level nodes: those whose parent OID is not in this module's node set
+        top_level = [n for n in nodes if n.oid[:-1] not in oid_set]
+
+        def make_node(n) -> dict[str, Any]:
+            record = _node_to_record(n)
+            record["has_children"] = bool(children_by_parent.get(n.oid))
+            return record
+
+        result_modules.append({
+            "name": mod_name,
+            "module": mod_name,
+            "oid": oid_to_string(nodes[0].oid) if nodes else "",
+            "type": "Module",
+            "children": [make_node(n) for n in top_level],
+        })
+
+    return {
+        "modules": result_modules,
+        "count": sum(len(m["children"]) for m in result_modules),
+    }
+
+
+def get_oid_tree(
+    *,
+    root_oid: str,
+    depth: int = 1,
+    module: str | None,
+    type_filter: str | None,
+    bundle: MibBundle | None,
+) -> dict[str, Any]:
+    module = _normalize_optional_filter(module)
+    type_filter = _normalize_optional_filter(type_filter)
+    if bundle is None:
+        return {"root": None, "children": [], "total_descendants": 0}
+
+    try:
+        root_tuple = parse_oid(root_oid)
+    except Exception:
+        return {"root": None, "children": [], "total_descendants": 0}
+
+    # Find root node
+    root_node = None
+    try:
+        match = bundle.lookup(root_tuple)
+        root_node = bundle.resolve_node(match.module, match.symbol)
+    except (UnknownOidError, Exception):
+        pass
+
+    root_record = _node_to_record(root_node) if root_node else {
+        "oid": root_oid, "oid_tuple": root_tuple, "name": root_oid, "full_name": root_oid,
+        "module": "", "type": "", "entry_type": "object",
+    }
+
+    # Collect direct children (one level below root)
+    all_nodes = list(bundle.iter_objects(module=module))
+    all_nodes += list(bundle.iter_notifications(module=module))
+    if type_filter:
+        all_nodes = [n for n in all_nodes if _ui_type(n) == type_filter]
+
+    prefix_len = len(root_tuple)
+    children = []
+    for n in all_nodes:
+        if n.oid[:prefix_len] == root_tuple and len(n.oid) == prefix_len + 1:
+            record = _node_to_record(n)
+            child_prefix = n.oid
+            child_prefix_len = len(child_prefix)
+            record["has_children"] = any(
+                c.oid[:child_prefix_len] == child_prefix and len(c.oid) > child_prefix_len
+                for c in all_nodes
+            )
+            children.append(record)
+    children.sort(key=lambda r: r["oid"])
+
+    descendants = sum(
+        1 for n in all_nodes
+        if n.oid[:prefix_len] == root_tuple and len(n.oid) > prefix_len
+    )
+
+    return {
+        "root": root_record,
+        "children": children,
+        "total_descendants": descendants,
+    }
+
+
+_UI_TYPE_TO_OBJECT_TYPE: dict[str, str] = {
+    "NotificationType": "NOTIFICATION-TYPE",
+    "MibScalar": "OBJECT-TYPE",
+    "MibTable": "OBJECT-TYPE",
+    "MibTableRow": "OBJECT-TYPE",
+    "MibTableColumn": "OBJECT-TYPE",
+    "ObjectGroup": "OBJECT-GROUP",
+    "ModuleCompliance": "MODULE-COMPLIANCE",
+}
+
+
+def search_bundle(
+    *,
+    query: str,
+    module: str | None,
+    type_filter: str | None,
+    limit: int = 100,
+    bundle: MibBundle | None,
+) -> dict[str, Any]:
+    module = _normalize_optional_filter(module)
+    type_filter = _normalize_optional_filter(type_filter)
+    if bundle is None:
+        return {"results": [], "count": 0}
+    # Translate UI type label to raw object_type for the bundle search
+    raw_type_filter = _UI_TYPE_TO_OBJECT_TYPE.get(type_filter or "", type_filter) if type_filter else None
+    nodes = bundle.search(query, module=module, type_filter=raw_type_filter, limit=limit * 2)
+    # Post-filter by UI type when the mapping is many-to-one (e.g. MibScalar vs MibTable both map to OBJECT-TYPE)
+    if type_filter and type_filter in {"MibScalar", "MibTable", "MibTableRow", "MibTableColumn"}:
+        nodes = [n for n in nodes if _ui_type(n) == type_filter]
+    results = [_node_to_record(n) for n in nodes[:limit]]
+    results.sort(key=lambda r: (r["module"], r["name"]))
+    return {"results": results, "count": len(results)}
+
+
+def _input_type_for_syntax(syntax: str | None) -> str:
+    """Map MIB syntax to the varbind type label the trap sender UI expects."""
+    s = (syntax or "").split("(")[0].strip()
+    sl = s.lower().replace("-", "")
+    if s in ("OBJECT IDENTIFIER", "AutonomousType") or sl == "objectidentifier":
+        return "OID"
+    if "ipaddress" in sl or "inetaddress" in sl:
+        return "IpAddress"
+    if "timeticks" in sl or "timestamp" in sl:
+        return "TimeTicks"
+    if "counter64" in sl:
+        return "Counter"
+    if "counter" in sl:
+        return "Counter"
+    if "gauge" in sl or "unsigned" in sl:
+        return "Gauge"
+    if "integer" in sl or "truthvalue" in sl or "rowstatus" in sl or "interfaceindex" in sl:
+        return "Integer"
+    return "String"
+
+
+def _member_entry(member, bundle: MibBundle) -> dict[str, Any]:
+    """Build a rich varbind descriptor for a notification member."""
+    mod = str(getattr(member, "module", "") or "").strip()
+    obj = str(getattr(member, "object", "") or "").strip()
+    entry: dict[str, Any] = {
+        "name": obj,
+        "full_name": f"{mod}::{obj}" if mod and obj else obj,
+        "module": mod,
+        "oid": "",
+        "syntax": "",
+        "input_type": "String",
+    }
+    try:
+        node = bundle.resolve_node(mod, obj)
+        if node is not None:
+            entry["oid"] = oid_to_string(node.oid) if node.oid else ""
+            entry["syntax"] = node.syntax or ""
+            entry["input_type"] = _input_type_for_syntax(node.syntax)
+            if node.constraints and isinstance(node.constraints, dict) and node.constraints.get("kind") == "enum":
+                enum_vals = []
+                for item in node.constraints.get("data") or []:
+                    if isinstance(item, (list, tuple)) and len(item) == 2:
+                        label, val = str(item[0]), item[1]
+                    elif isinstance(item, dict):
+                        label = str(item.get("name") or item.get("label") or item.get("symbol") or "")
+                        val = item.get("value")
+                    else:
+                        continue
+                    if isinstance(val, int):
+                        enum_vals.append({"label": label or str(val), "value": val})
+                if enum_vals:
+                    entry["enum_values"] = enum_vals
+    except Exception:
+        pass
+    return entry
+
+
+def get_trap_catalog(*, bundle: MibBundle | None) -> dict[str, Any]:
+    if bundle is None:
+        return {"traps": []}
+    traps = []
+    for node in bundle.iter_notifications():
+        oid_str = oid_to_string(node.oid) if node.oid else ""
+        objects = [_member_entry(m, bundle) for m in (node.members or [])]
+        traps.append({
+            "name": node.name,
+            "full_name": f"{node.module}::{node.name}",
+            "oid": oid_str,
+            "module": node.module,
+            "description": node.description or "",
+            "objects": objects,
+        })
+    return {"traps": sorted(traps, key=lambda t: (t["module"], t["name"]))}
+
+
+def get_node(oid: str, *, module: str | None, bundle: MibBundle | None) -> dict[str, Any]:
+    if bundle is None:
+        return {"node": None, "breadcrumb": [], "trap_objects": []}
+
+    node = None
+    # Try MODULE::symbol format
+    if "::" in oid:
+        parts = oid.split("::", 1)
+        node = bundle.resolve_node(parts[0], parts[1].split(".")[0])
+    if node is None:
+        try:
+            match = bundle.lookup(oid)
+            node = bundle.resolve_node(match.module, match.symbol)
+        except (UnknownOidError, Exception):
+            pass
+
+    node_record = _node_to_record(node) if node else None
+
+    # Build breadcrumb from OID parents
+    breadcrumb: list[dict[str, Any]] = []
+    if node:
+        for i in range(1, len(node.oid)):
+            prefix = node.oid[:i]
+            try:
+                m = bundle.lookup(prefix)
+                parent = bundle.resolve_node(m.module, m.symbol)
+                if parent:
+                    breadcrumb.append({
+                        "oid": oid_to_string(prefix),
+                        "name": parent.name,
+                        "full_name": f"{parent.module}::{parent.name}",
+                        "module": parent.module,
+                    })
+            except (UnknownOidError, Exception):
+                pass
+
+    # Trap objects (notification members)
+    trap_objects: list[dict[str, Any]] = []
+    if node and node.object_type in ("NOTIFICATION-TYPE", "TRAP-TYPE") and node.members:
+        for member in node.members:
+            trap_objects.append(_member_entry(member, bundle))
+
+    return {
+        "node": node_record,
+        "breadcrumb": breadcrumb,
+        "trap_objects": trap_objects,
+    }

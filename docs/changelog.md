@@ -2,10 +2,60 @@
 
 All notable changes to Trishul SNMP Suite will be documented in this file.
 
+This file intentionally retains historical `1.x` release entries. Those
+sections are release history, not the operator source of truth for the shipped
+`2.0.0` UI or runtime behavior.
+
+The current stable release line is `2.0.0`. The entries below `2.0.0` are
+historical `1.x` releases retained for release history.
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+
+## [2.0.0] - 2026-05-21
+
+### Added
+- **Backend Platform** - FastAPI application with Alembic-managed SQLite schema, durable session storage, durable notification history, and in-process SNMP runtime.
+- **In-Process SNMP Runtime** - Replaced subprocess-based pysnmp workers with a fully in-process async runtime via `trishul-snmp`: responder, manager (GET/GETNEXT/GETBULK/walk/bulkwalk), notification listener, trap/inform send, and offline payload decode. No subprocesses, no UDP loopback IPC, no shell-outs.
+- **Simulation Rules** - Counter, random, timestamp, and uptime simulation rules for the responder.
+- **Bundle Pipeline** - MIB compilation via `trishul-smi` with versioned bundle storage, activation, compile history, and in-memory `MibBundle` for all catalog and browser queries. No SQLite catalog index tables.
+- **MIB Source Management** - Upload source groups, source group precedence, duplicate shadowing detection, partial compile, and dependency auto-fetch.
+- **Flat Service Architecture** - All API routes call service modules directly. No bridge or adapter classes between routes and services.
+- **Release UI** - Page-based operator shell: `Dashboard`, `Simulator`, `Walk & Parse`, `Traps`, `MIB Browser`, `MIB Manager`, `Settings`.
+- **Notification History** - Durable received and sent notification events persisted in SQLite for trap workflows, stats, and operational diagnostics.
+- **Backend Test Layout** - File-scoped unit, contract, integration, and live test suites with an explicit backend coverage gate for the shipped runtime.
+
+### Changed
+- **Architecture** - Single FastAPI application, single SQLite database, single in-process SNMP runtime. Replaced the v1.x subprocess worker model (pysnmp + separate simulator and trap receiver processes communicating via UDP loopback and file-based stats).
+- **API** - One unified `/api/...` surface. The separate secondary route families for simulator, catalog, bundles, runtime, profiles, and history have been eliminated.
+- **Stats** - Stats counters now stored in the SQLite `app_settings` table rather than a file-backed stats store with cross-process file locking.
+- **Page Data Flow** - Dashboard and MIB Manager now reuse persisted stats and source inventory state instead of reprocessing MIB inventory on every page switch.
+- **Frontend Build** - The shipped image builds `frontend/` into `frontend/dist` at container build time.
+- **Documentation** - Core docs rewritten to reflect the flat service architecture, actual API surface, and real test file inventory.
+
+### Fixed
+- **Bootstrap** - Release-shell packaging ships the built frontend artifact in the runtime image.
+- **Packaging** - `alembic.ini` is shipped in the runtime image so startup migrations succeed in the container.
+- **Dashboard / MIB Manager** - MIB counters and source stats no longer hang in loading state after page switches; the dashboard source card now renders correctly from the active stats snapshot.
+- **MIB Browser** - Search requests now preserve the selected type filter in the UI flow.
+- **MIB Manager** - Upload and validation status stay in sync, source-group filtering returns the correct in-group totals, and per-row failed-MIB delete actions update modal state cleanly.
+- **Compiler / Sources** - Vendor `SNMPv2-SMI.mib` naming conflicts no longer break bundle compilation.
+- **Settings / Runtime Stats** - Reset stats now clears the in-memory simulator request counter as well as persisted counters.
+- **Traps** - Varbind enum dropdowns load correctly again in the trap send flow.
+
+### Removed
+- **Subprocess Workers** - `workers/snmp_simulator.py` and `workers/trap_receiver.py` eliminated; all SNMP runs in-process.
+- **Operator Shell Bridge** - `backend/app/services/operator_shell.py` and the shell bridge layer eliminated; routes call flat services directly.
+- **Catalog Index Tables** - `BundleObject` and `BundleNotification` SQLite tables removed; catalog and browser queries use the in-memory `MibBundle`.
+- **Profiles** - Saved connection and simulator profile services removed; scheduled for `2.1.0`.
+- **Secondary Runtime/Bundle/Catalog/Profile Routes** - The extra runtime, bundle, catalog, profile, session, and system route families were removed; functionality is now exposed through the main `/api/...` surface.
+- **Secondary History Routes** - The separate history route family was removed; if history workflows return to the UI they should be exposed through the main `/api/...` surface.
+
+### Migration Notes
+- Existing credentials and uploaded MIB files carry forward into the `2.0.0` runtime.
+- There are no catalog index tables in `2.0.0`. MIB status and browser queries use the compiled bundle loaded in memory.
 
 ## [1.4.1] - 2026-05-06
 
@@ -28,7 +78,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Branding** - Renamed the product to `Trishul SNMP Suite` and aligned runtime metadata with version `1.4.0`.
 - **Runtime** - FastAPI now serves `/`, module partials, static assets, `/api/*`, `/api/ws`, and `/docs` directly from one container.
 - **Deployment** - Docker Compose and GHCR publishing now target a single image: `ghcr.io/<owner>/trishul-snmp-suite`.
-- **Installer** - `install-trishul-snmp.sh` now acts as a compatibility wrapper around the new suite installer.
+- **Installer** - The now-removed `install-trishul-snmp.sh` acted as a compatibility wrapper around the new suite installer in the `1.4.x` line.
 
 ### Removed
 - **Nginx Frontend Layer** - Removed the dedicated frontend image and Nginx proxy from the default deployment path.
@@ -45,7 +95,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **MIB Manager** - Trusted remote dependency fetch with an ordered source list, manual fetch action, and optional auto-fetch during upload or reload.
 - **MIB Browser** - Current-view export for both search results and filtered tree views in JSON and CSV.
-- **Deployment Script** - `install-trishul-snmp.sh` now supports local image builds via `build-local`, `up-local`, `restart-local`, or `TRISHUL_IMAGE_SOURCE=local`.
+- **Deployment Script** - At that point in the `1.3.x` line, `install-trishul-snmp.sh` supported local image builds via `build-local`, `up-local`, `restart-local`, or `TRISHUL_IMAGE_SOURCE=local`.
 - **Tests** - Smoke and regression coverage for login, lifecycle flows, trap send/receive, walk execution, MIB upload/reload, auth cutoff, startup failure handling, and concurrent stats writes.
 - **Docs** - Repo-local development setup, release process, GitHub workflow, and PR template guidance.
 

@@ -1,43 +1,42 @@
 # UI Verification Checklist
 
-Use this checklist before cutting a UI-affecting release such as `1.3.1`.
+Use this checklist for the current `2.0.0` release UI.
 
 ## Test Matrix
 
-- Desktop: `1440px` wide viewport
-- Mobile: `390px` wide viewport
-- Themes: light and dark
-- Entry points: fresh logged-out load and normal authenticated app load
+- desktop: `1440px` wide viewport
+- laptop: `1024px` wide viewport
+- mobile: `390px` wide viewport
+- entry points: fresh logged-out load and authenticated session restore
 
 ## Setup
 
-1. Start the local stack with the intended release build.
-2. Open the frontend in a clean browser profile.
-3. Verify default login still works, or use the current configured credentials.
-4. Repeat the core checks once in light mode and once in dark mode.
+1. start the intended release build or local installer flow
+2. open the app in a clean browser profile
+3. verify login with the current configured credentials
+4. repeat the page checks at desktop and mobile widths
 
 ## Global Checks
 
-- Fresh page load applies the saved theme before first paint on the login screen and app shell.
-- Theme toggle is keyboard reachable, exposes a meaningful label, and updates icon plus state correctly.
-- Navbar, sidebar, cards, inputs, tables, modals, and code panes use one coherent surface palette in both themes.
-- Sticky headers remain readable while scrolling and do not flash white in dark mode.
-- Icon-only buttons have consistent sizing, spacing, and focus styling.
-- Desktop layout does not clip header actions or sidebar content.
-- Mobile layout keeps login usable, navbar controls wrapped cleanly, and page actions reachable without horizontal scrolling.
+- login page loads metadata, version, and health without broken layout
+- authenticated shell lands on `Dashboard` and hash routing works across every page
+- live connection status reaches the online state after login and recovers after refresh
+- sidebar, header badges, and sign-out action stay visible and usable
+- forms, buttons, tables, and cards keep consistent spacing and focus treatment
+- desktop layout does not clip long labels, JSON blocks, or header actions
+- mobile layout avoids horizontal scrolling and keeps primary actions reachable
 
 ## Page Checks
 
-- Login: auth card is centered, responsive, readable, and shows no light-mode flash when dark mode is saved.
-- Dashboard: stat cards, quick actions, badges, and icon treatments look consistent.
-- Simulator: metrics strip, custom-data note, toolbar, and live log pane render correctly in both themes.
-- Walker: empty state, progress bar, result pane, history list, and export controls render correctly in both themes.
-- Traps: sender form, receiver controls, sticky table header, JSON preview modal, and action buttons render correctly in both themes.
-- Browser: search/filter card, tree controls, sticky details panel, breadcrumb, description blocks, and varbind lists render correctly in both themes.
-- MIB Manager: stats strip, MIB list, failed-MIB card, upload modal, and trap details modal render correctly in both themes.
-- Settings: auth panel, switches, badges, and about metadata remain readable and aligned in both themes.
+- `Dashboard`: status cards, counters, and shortcuts all load cleanly
+- `Simulator`: config form, JSON editor, status panel, and activity log all remain usable and update live
+- `Walk & Parse`: walk form, results panel, filters, copy, and export actions all behave correctly
+- `Traps`: listener controls, sender form, trap library, varbind editor, and received-events table all render and update correctly in live use
+- `MIB Browser`: module view, OID view, search, filters, and detail pane all remain usable
+- `MIB Manager`: status counters, trap catalog, export actions, upload dialog, validation, and reload actions all behave correctly
+- `Settings`: auth form, app settings, stats actions, and metadata panels all remain usable
 
 ## Sign-Off
 
-- Record any visual regressions with page name, viewport, theme, and screenshot.
-- Do not mark UI tracker items done until this checklist passes for the release build.
+- record any regressions with page, viewport, and screenshot
+- do not mark UI-affecting release work complete until this checklist passes on the intended release build
