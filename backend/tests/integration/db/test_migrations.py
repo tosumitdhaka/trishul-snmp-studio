@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import importlib.util
 import json
 import sqlite3
-from pathlib import Path
 
 import pytest
 
 pytestmark = pytest.mark.integration
 
 
-def test_alembic_upgrade_from_s5_preserves_existing_rows(monkeypatch, tmp_path):
+def test_upgrade_database_creates_current_schema_and_preserves_rows(monkeypatch, tmp_path):
     from app.core.config import get_settings, reset_settings_cache
     from app.db.migrations import upgrade_database
     from app.db.session import reset_db_runtime
@@ -26,7 +24,7 @@ def test_alembic_upgrade_from_s5_preserves_existing_rows(monkeypatch, tmp_path):
 
     settings = get_settings()
     try:
-        upgrade_database("20260511_0005")
+        upgrade_database()
 
         with sqlite3.connect(settings.db_path) as connection:
             connection.execute(
@@ -35,7 +33,7 @@ def test_alembic_upgrade_from_s5_preserves_existing_rows(monkeypatch, tmp_path):
             )
             connection.commit()
 
-        upgrade_database("head")
+        upgrade_database()
 
         with sqlite3.connect(settings.db_path) as connection:
             tables = {
@@ -49,7 +47,18 @@ def test_alembic_upgrade_from_s5_preserves_existing_rows(monkeypatch, tmp_path):
                 ("session_timeout_seconds",),
             ).fetchone()
 
-        assert "auth_sessions" in tables
+        assert {
+            "alembic_version",
+            "app_settings",
+            "auth_sessions",
+            "bundle_sets",
+            "bundle_modules",
+            "bundle_objects",
+            "bundle_notifications",
+            "compile_runs",
+            "notification_events",
+            "notification_event_search",
+        } <= tables
         assert stored_value is not None
         assert int(stored_value[0]) == 900
     finally:
@@ -135,83 +144,6 @@ def test_file_bootstrap_from_1x_layout_supports_v2_state(monkeypatch, tmp_path):
         bundle_state = BundleService(settings).list_state()
         assert bundle_state["active_bundle_id"] is None
         assert bundle_state["active_pointer"] is None
-    finally:
-        reset_db_runtime()
-        reset_settings_cache()
-        reset_runtime_service()
-
-
-def test_upgrade_renames_state_setting_keys(monkeypatch, tmp_path):
-    from app.core.config import get_settings, reset_settings_cache
-    from app.db.migrations import upgrade_database
-    from app.db.session import reset_db_runtime
-    from app.services.runtime import reset_runtime_service
-    from app.services.state_store import (
-        _AUTO_START_SIMULATOR_KEY,
-        _MIB_RELOAD_COUNT_KEY,
-        _MIB_REMOTE_SOURCES_KEY,
-    )
-
-    data_dir = tmp_path / "rename-data"
-    monkeypatch.setenv("TRISHUL_DATA_DIR", str(data_dir))
-    monkeypatch.delenv("DATABASE_URL", raising=False)
-
-    reset_settings_cache()
-    reset_db_runtime()
-    reset_runtime_service()
-
-    settings = get_settings()
-    migration_path = (
-        Path(__file__).resolve().parents[3]
-        / "alembic"
-        / "versions"
-        / "20260521_0007_state_setting_keys.py"
-    )
-    spec = importlib.util.spec_from_file_location("state_setting_keys_migration", migration_path)
-    assert spec is not None and spec.loader is not None
-    rename_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(rename_module)
-    try:
-        upgrade_database("20260511_0006")
-
-        target_values = {
-            _AUTO_START_SIMULATOR_KEY: True,
-            _MIB_REMOTE_SOURCES_KEY: ["https://example.invalid/a", "https://example.invalid/b"],
-            _MIB_RELOAD_COUNT_KEY: 4,
-        }
-        rows_to_insert = [
-            (old_key, json.dumps(target_values[new_key]))
-            for old_key, new_key in rename_module.KEY_RENAMES
-            if new_key in target_values
-        ]
-
-        with sqlite3.connect(settings.db_path) as connection:
-            connection.executemany(
-                "INSERT INTO app_settings (key, value_json) VALUES (?, ?)",
-                rows_to_insert,
-            )
-            connection.commit()
-
-        upgrade_database("head")
-
-        with sqlite3.connect(settings.db_path) as connection:
-            rows = dict(connection.execute("SELECT key, value_json FROM app_settings").fetchall())
-
-        def _decode_value(raw_value):
-            return json.loads(raw_value) if isinstance(raw_value, str) else raw_value
-
-        for old_key, new_key in rename_module.KEY_RENAMES:
-            if new_key not in target_values:
-                continue
-            assert old_key not in rows
-            assert new_key in rows
-
-        assert _decode_value(rows[_AUTO_START_SIMULATOR_KEY]) is True
-        assert _decode_value(rows[_MIB_REMOTE_SOURCES_KEY]) == [
-            "https://example.invalid/a",
-            "https://example.invalid/b",
-        ]
-        assert _decode_value(rows[_MIB_RELOAD_COUNT_KEY]) == 4
     finally:
         reset_db_runtime()
         reset_settings_cache()

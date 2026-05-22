@@ -38,6 +38,8 @@ def test_lifespan_bootstraps_empty_db(monkeypatch, tmp_path):
         "auth_sessions",
         "bundle_sets",
         "bundle_modules",
+        "bundle_objects",
+        "bundle_notifications",
         "compile_runs",
         "notification_events",
     } <= set(inspector.get_table_names())
