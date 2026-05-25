@@ -27,6 +27,17 @@ keeping the familiar page-based operator shell as the release UI.
 
 ## Quick Start
 
+Try the published release in one command:
+
+```bash
+curl -LfsS -o install-trishul-snmp-suite.sh \
+  https://raw.githubusercontent.com/tosumitdhaka/trishul-snmp-suite/main/install-trishul-snmp-suite.sh \
+  && bash install-trishul-snmp-suite.sh up
+```
+
+If you want to pin the installer to a specific release, replace `main` in the
+URL with a release tag such as `v2.0.1`.
+
 From a local checkout, start the published image with:
 
 ```bash

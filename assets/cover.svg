@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1280" height="640" viewBox="0 0 1280 640" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Trishul SNMP Suite cover</title>
+  <desc id="desc">A repository cover using the real dashboard screenshot faded into a dark left panel with product details and page labels.</desc>
+  <defs>
+    <linearGradient id="overallTint" x1="0" y1="0" x2="1280" y2="640" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#081120" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#0B1630" stop-opacity="0.12"/>
+    </linearGradient>
+    <linearGradient id="leftFade" x1="0" y1="0" x2="860" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06101E" stop-opacity="0.98"/>
+      <stop offset="0.46" stop-color="#071120" stop-opacity="0.95"/>
+      <stop offset="0.70" stop-color="#071120" stop-opacity="0.72"/>
+      <stop offset="0.88" stop-color="#071120" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#071120" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="topGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1036 92) rotate(90) scale(190 300)">
+      <stop offset="0" stop-color="#40D8FF" stop-opacity="0.18"/>
+      <stop offset="0.50" stop-color="#40D8FF" stop-opacity="0.07"/>
+      <stop offset="1" stop-color="#40D8FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="amberGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(158 118) rotate(90) scale(138 138)">
+      <stop offset="0" stop-color="#FFB84D" stop-opacity="0.32"/>
+      <stop offset="0.52" stop-color="#FF9B3A" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#FF9B3A" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tridentGradient" x1="32" y1="2" x2="32" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD978"/>
+      <stop offset="0.42" stop-color="#FFB84D"/>
+      <stop offset="1" stop-color="#FF8A3D"/>
+    </linearGradient>
+    <linearGradient id="cardFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#121D33" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#0D1628" stop-opacity="0.86"/>
+    </linearGradient>
+  </defs>
+
+  <image href="snips/dashboard.png" x="-36" y="-28" width="1360" height="676" preserveAspectRatio="xMidYMid slice"/>
+  <rect width="1280" height="640" fill="url(#overallTint)"/>
+  <rect width="900" height="640" fill="url(#leftFade)"/>
+  <circle cx="1036" cy="92" r="300" fill="url(#topGlow)"/>
+  <circle cx="158" cy="118" r="138" fill="url(#amberGlow)"/>
+
+  <g opacity="0.18">
+    <path d="M88 92L198 136L344 112L486 174L638 142L772 190" stroke="#93A9CA" stroke-width="2" stroke-dasharray="6 8"/>
+    <circle cx="88" cy="92" r="7" fill="#A9BEDD"/>
+    <circle cx="198" cy="136" r="7" fill="#A9BEDD"/>
+    <circle cx="344" cy="112" r="7" fill="#A9BEDD"/>
+    <circle cx="486" cy="174" r="7" fill="#A9BEDD"/>
+    <circle cx="638" cy="142" r="7" fill="#A9BEDD"/>
+    <circle cx="772" cy="190" r="7" fill="#A9BEDD"/>
+  </g>
+
+  <g transform="translate(82 72) scale(1.55)">
+    <path d="M57 24.6C54 17.4 44.8 8.7 44.8 8.7S47.8 16.1 45.6 26L49.1 23C49.1 23 52.4 24.4 52.8 28C53.3 32.4 50.8 38.6 50.8 38.6C50.8 38.6 45.3 36.9 36.9 37L33.9 17.4L41.1 22.1L32 2L22.9 22.1L30.1 17.4L27.1 37C18.7 36.9 13.2 38.6 13.2 38.6C13.2 38.6 10.7 32.4 11.2 28C11.6 24.5 14.9 23 14.9 23L18.4 26C16.2 16.2 19.2 8.7 19.2 8.7S10 17.4 7 24.6C3.9 32 2 40.8 2 40.8L8.4 46.7C8.4 46.7 14 45 18.4 44.7C22.5 44.4 27.3 44.3 27.3 44.3L26.7 53L32 62L37.3 53L36.7 44.3C36.7 44.3 41.5 44.4 45.6 44.7C49.9 45 55.6 46.7 55.6 46.7L62 40.8C62 40.8 60.1 32 57 24.6Z" fill="url(#tridentGradient)"/>
+  </g>
+  <text x="72" y="246" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="74" font-weight="700">Trishul</text>
+  <text x="72" y="310" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="74" font-weight="700">SNMP Suite</text>
+
+  <text x="72" y="368" fill="#C8D2E5" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="27" font-weight="400">SNMP lab for browsing, simulation, walks, traps,</text>
+  <text x="72" y="402" fill="#C8D2E5" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="27" font-weight="400">exports, and real vendor MIB workflows.</text>
+
+  <g transform="translate(72 444)">
+    <rect width="402" height="40" rx="20" fill="url(#cardFill)" stroke="#E7B35E" stroke-opacity="0.22"/>
+    <circle cx="22" cy="20" r="7" fill="#FFB84D"/>
+    <text x="42" y="26" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="17" font-weight="600">Reliable MIB compilation</text>
+  </g>
+
+  <g transform="translate(72 492)">
+    <rect width="370" height="40" rx="20" fill="url(#cardFill)" stroke="#52C7FF" stroke-opacity="0.22"/>
+    <circle cx="22" cy="20" r="7" fill="#34D3FF"/>
+    <text x="42" y="26" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="17" font-weight="600">In-process SNMP runtime</text>
+  </g>
+
+  <g transform="translate(72 548)">
+    <rect width="118" height="36" rx="18" fill="url(#cardFill)" stroke="#B9C8E4" stroke-opacity="0.16"/>
+    <text x="26" y="24" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="16" font-weight="600">Dashboard</text>
+  </g>
+  <g transform="translate(204 548)">
+    <rect width="116" height="36" rx="18" fill="url(#cardFill)" stroke="#B9C8E4" stroke-opacity="0.16"/>
+    <text x="28" y="24" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="16" font-weight="600">Simulator</text>
+  </g>
+  <g transform="translate(334 548)">
+    <rect width="138" height="36" rx="18" fill="url(#cardFill)" stroke="#B9C8E4" stroke-opacity="0.16"/>
+    <text x="24" y="24" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="16" font-weight="600">Walk &amp; Parse</text>
+  </g>
+
+  <g transform="translate(72 592)">
+    <rect width="126" height="36" rx="18" fill="url(#cardFill)" stroke="#B9C8E4" stroke-opacity="0.16"/>
+    <text x="22" y="24" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="16" font-weight="600">MIB Browser</text>
+  </g>
+  <g transform="translate(212 592)">
+    <rect width="78" height="36" rx="18" fill="url(#cardFill)" stroke="#B9C8E4" stroke-opacity="0.16"/>
+    <text x="24" y="24" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="16" font-weight="600">Traps</text>
+  </g>
+  <g transform="translate(304 592)">
+    <rect width="126" height="36" rx="18" fill="url(#cardFill)" stroke="#B9C8E4" stroke-opacity="0.16"/>
+    <text x="18" y="24" fill="#F7FAFF" font-family="Ubuntu Sans, Ubuntu, Liberation Sans, sans-serif" font-size="16" font-weight="600">MIB Manager</text>
+  </g>
+
+</svg>
