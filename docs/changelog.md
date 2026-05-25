@@ -4,15 +4,35 @@ All notable changes to Trishul SNMP Suite will be documented in this file.
 
 This file intentionally retains historical `1.x` release entries. Those
 sections are release history, not the operator source of truth for the shipped
-`2.0.0` UI or runtime behavior.
+`2.0.1` UI or runtime behavior.
 
-The current stable release line is `2.0.0`. The entries below `2.0.0` are
+The current stable release line is `2.0.1`. The entries below `2.0.1` are
 historical `1.x` releases retained for release history.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
+
+## [2.0.1] - 2026-05-25
+
+### Changed
+- **Installer / Ports** - `APP_PORT` is now the canonical app port with default `8980`; `BACKEND_PORT` is an optional compatibility alias to the same merged app, the installer reuses current deployed host ports when no override is passed, and `BACKEND_PORT=none` removes the alias on the next restart.
+- **Logging / Observability** - Container deployments now log to `stdout`/`stderr` by default with Docker-managed rotation; Alembic, uvicorn, and app logs use the same timestamped format; startup and shutdown lifecycle logs stay visible; routine HTTP request noise is pushed below `INFO`; simulator and trap runtime events are logged as meaningful operator signals.
+- **MIB Status Model** - `/api/mibs/status` now separates deduplicated `active_modules` from per-source `source_inventory`; compatibility fields `mibs` and `errors` remain as the active and failed aliases for the v1 API.
+- **MIB Exports** - Source-group scoped exports now use source-group membership over the single active runtime bundle, while `All modules` and active-bundle exports stay deduplicated.
+- **Docs / Validation** - README and operator docs now reflect the `2.0.1` installer port model, release-validation commands, and the shipped API behavior.
+
+### Fixed
+- **MIB Manager** - Duplicate modules across source groups are no longer treated as failed by default; group filtering and failed-MIB views now distinguish `active`, `shadowed`, `invalid`, and true compile failures correctly.
+- **Compiler Attribution** - Compile metadata now persists selected source paths and result rows so per-file status, invalid-parse detection, and failure attribution stay stable after reloads and page changes.
+- **MIB Browser** - Search keeps the active type filter, and filtered module or type views auto-expand one level so the result is immediately visible.
+- **Traps** - Trap history preserves event-time OID resolution, header resolve status stays in sync, enum varbind options load again, and live received-event updates continue even when the WebSocket path is degraded.
+- **Exports / Stats** - Exported filenames now reflect the exported bundle or notification scope, and stats export no longer includes the full runtime OID catalog by default.
+
+### Migration Notes
+- No new operator data migration is required for deployments already on `2.0.0`; the `2.0.1` line keeps the same SQLite-plus-bundles runtime model.
+- If you were using the compatibility alias, redeploy without explicit port overrides to keep the current host mapping, or set `BACKEND_PORT=none` to remove the alias on the next restart.
 
 ## [2.0.0] - 2026-05-21
 

@@ -201,6 +201,10 @@ def _format_trap_event(
     bundle,
 ) -> dict[str, Any]:
     event = item.get("event") if isinstance(item.get("event"), dict) else dict(item)
+    event_resolve_mibs = item.get("resolve_mibs")
+    if not isinstance(event_resolve_mibs, bool):
+        event_resolve_mibs = event.get("resolve_mibs")
+    effective_resolve_mibs = event_resolve_mibs if isinstance(event_resolve_mibs, bool) else bool(resolve_mibs)
     source_address = item.get("source_address") or event.get("source_address") or {}
     source_host = str(source_address.get("host") or "")
     source_port = source_address.get("port")
@@ -210,7 +214,7 @@ def _format_trap_event(
 
     # Try to resolve notification name from bundle
     notification_name = str(item.get("notification_name") or event.get("notification_name") or "").strip()
-    if resolve_mibs and bundle is not None and notification_oid:
+    if effective_resolve_mibs and bundle is not None and notification_oid:
         try:
             from trishul_snmp.mib.registry import oid_to_string
             from trishul_snmp.errors import UnknownOidError
@@ -219,14 +223,18 @@ def _format_trap_event(
         except Exception:
             pass
 
-    trap_type = notification_name if resolve_mibs and notification_name else (notification_oid or item.get("pdu_type") or "trap")
-    if resolve_mibs and "::" in str(trap_type):
+    trap_type = (
+        notification_name
+        if effective_resolve_mibs and notification_name
+        else (notification_oid or item.get("pdu_type") or "trap")
+    )
+    if effective_resolve_mibs and "::" in str(trap_type):
         trap_type = str(trap_type).split("::", 1)[1]
 
     varbinds = []
     for vb in event.get("varbinds", []):
         symbolic = vb.get("symbolic") or vb.get("oid") or ""
-        display = symbolic if resolve_mibs else (vb.get("oid") or symbolic)
+        display = symbolic if effective_resolve_mibs else (vb.get("oid") or symbolic)
         raw_val = vb.get("value")
         value = raw_val.get("display") if isinstance(raw_val, dict) and "display" in raw_val else (
             raw_val.get("value") if isinstance(raw_val, dict) else vb.get("display_value")
@@ -234,7 +242,7 @@ def _format_trap_event(
         varbinds.append({
             "oid": vb.get("oid") or "",
             "name": display,
-            "resolved": bool(resolve_mibs and symbolic and symbolic != vb.get("oid")),
+            "resolved": bool(effective_resolve_mibs and symbolic and symbolic != vb.get("oid")),
             "value": value,
         })
 
@@ -255,6 +263,7 @@ def _format_trap_event(
         "time_str": time_str,
         "source": source,
         "trap_type": trap_type,
-        "resolved": bool(resolve_mibs and notification_name and notification_name != notification_oid),
+        "resolve_mibs": effective_resolve_mibs,
+        "resolved": bool(effective_resolve_mibs and notification_name and notification_name != notification_oid),
         "varbinds": varbinds,
     }

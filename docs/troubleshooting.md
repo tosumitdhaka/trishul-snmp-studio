@@ -1,6 +1,6 @@
 # Troubleshooting
 
-This guide covers the most common `2.0.0` runtime and operator issues.
+This guide covers the most common `2.0.1` runtime and operator issues.
 
 ## The App Does Not Start
 
@@ -8,10 +8,12 @@ Check:
 
 - `./install-trishul-snmp-suite.sh status`
 - `./install-trishul-snmp-suite.sh logs`
+- `docker logs --tail 200 trishul-snmp-suite`
 
 Common causes:
 
 - `APP_PORT` already in use
+- `BACKEND_PORT` already in use when a compatibility alias is enabled
 - `SNMP_PORT` already in use
 - `TRAP_PORT` already in use
 - Docker not running
@@ -19,7 +21,7 @@ Common causes:
 If needed, choose different ports:
 
 ```bash
-APP_PORT=8980 SNMP_PORT=2161 TRAP_PORT=2162 ./install-trishul-snmp-suite.sh up
+APP_PORT=9080 BACKEND_PORT=9000 SNMP_PORT=2161 TRAP_PORT=2162 ./install-trishul-snmp-suite.sh up
 ```
 
 ## The UI Loads But Login Fails
@@ -30,7 +32,7 @@ Check:
 - the credentials are current
 - the session token is not expired
 
-Important `2.0.0` note:
+Important current-line note:
 
 - credentials are stored in SQLite-backed app settings, not only in `secrets.json`
 - there is no in-product password-reset flow yet
@@ -121,7 +123,11 @@ Important runtime paths:
 - `bundles/cache/tsmi/`
 - `mibs/`
 - `configs/custom_data.json`
-- `logs/`
+
+Container logs are not persisted in the data volume by default. Read them with
+`./install-trishul-snmp-suite.sh logs` or `docker logs trishul-snmp-suite`.
+`/app/backend/data/logs/backend.log` is only used when file logging is
+explicitly enabled.
 
 ## Useful Commands
 
@@ -129,7 +135,8 @@ Important runtime paths:
 ./install-trishul-snmp-suite.sh status
 ./install-trishul-snmp-suite.sh logs
 npm --prefix frontend run build
-.venv/bin/python scripts/run_release_gate.py
+.venv/bin/python -m pytest backend/ -q
+.venv/bin/python scripts/check_backend_coverage.py
 ```
 
 If the problem is still unclear, reduce the workflow to:

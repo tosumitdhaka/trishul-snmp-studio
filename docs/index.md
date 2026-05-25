@@ -1,6 +1,6 @@
 # Documentation
 
-This directory is the canonical documentation set for Trishul SNMP Suite `2.0.0`.
+This directory is the canonical documentation set for Trishul SNMP Suite `2.0.1`.
 The shipped operator surface is the restored page-based shell in `frontend/`:
 `Dashboard`, `Simulator`, `Walk & Parse`, `Traps`, `MIB Browser`,
 `MIB Manager`, and `Settings`.
@@ -17,9 +17,9 @@ The shipped operator surface is the restored page-based shell in `frontend/`:
 - [Architecture Overview](architecture_overview.md)
 - [API Reference](api_reference.md)
 - [Troubleshooting](troubleshooting.md)
-- [Migration To Trishul SNMP Suite 2.0.0](migration_to_trishul_snmp_suite.md)
+- [Migration Guide](migration_to_trishul_snmp_suite.md)
 
-`Migration To Trishul SNMP Suite 2.0.0` and `Changelog` intentionally contain
+`Migration Guide` and `Changelog` intentionally contain
 historical `1.x` references. They are still current docs, but not steady-state
 operator guidance.
 
@@ -31,7 +31,7 @@ status references.
 
 ## Operator Guides
 
-These topic guides describe the current `2.0.0` release UI.
+These topic guides describe the current `2.0.1` release UI.
 
 - [MIB Manager Guide](mib_manager_guide.md)
 - [MIB Browser Guide](mib_browser_guide.md)

@@ -1,11 +1,11 @@
 # First Steps
 
 This is the fastest end-to-end validation flow for a fresh Trishul SNMP Suite
-`2.0.0` install using the current page-based release UI.
+`2.0.1` install using the current page-based release UI.
 
 The examples below assume the default installer ports:
 
-- app UI: `8080/tcp`
+- app UI: `8980/tcp`
 - responder test port: `1061/udp`
 - notification-listener test port: `1162/udp`
 

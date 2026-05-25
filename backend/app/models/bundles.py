@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -105,7 +106,7 @@ class CompileRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     requested_mib_names_json: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     source_dirs_json: Mapped[list[str]] = mapped_column(JSON, nullable=False)
-    command_json: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    command_json: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     bundle_key: Mapped[str | None] = mapped_column(String(120), nullable=True)
     output_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
     manifest_path: Mapped[str | None] = mapped_column(Text, nullable=True)

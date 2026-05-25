@@ -149,11 +149,11 @@ async def execute(
     runtime_service,
 ) -> dict[str, Any]:
     from app.services.runtime import RuntimeServiceError
-    raw_format = str(json_format or "oid").strip().lower()
-    if raw_format == "grouped":
+    raw_format = str(json_format or "flat").strip().lower()
+    if raw_format in {"grouped", "metrics"}:
         normalized_format = "grouped"
     else:
-        normalized_format = "oid"
+        normalized_format = "flat"
     try:
         result = await runtime_service.manager_walk(
             host=target, port=port, community=community, root=oid, bulk=True

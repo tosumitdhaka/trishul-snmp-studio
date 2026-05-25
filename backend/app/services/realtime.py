@@ -26,13 +26,13 @@ class WebSocketManager:
     async def connect(self, websocket: WebSocket, *, token: str) -> None:
         await websocket.accept()
         self._connections.append(ManagedConnection(websocket=websocket, token=token))
-        logger.info("WebSocket client connected; active=%d", len(self._connections))
+        logger.debug("WebSocket client connected; active=%d", len(self._connections))
 
     def disconnect(self, websocket: WebSocket) -> None:
         remaining = [item for item in self._connections if item.websocket is not websocket]
         if len(remaining) != len(self._connections):
             self._connections = remaining
-            logger.info("WebSocket client disconnected; active=%d", len(self._connections))
+            logger.debug("WebSocket client disconnected; active=%d", len(self._connections))
 
     async def send_to(self, websocket: WebSocket, payload: dict[str, Any]) -> None:
         try:

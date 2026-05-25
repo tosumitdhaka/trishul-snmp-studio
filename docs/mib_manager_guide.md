@@ -1,6 +1,6 @@
 # MIB Manager Guide
 
-The current `2.0.0` release UI keeps `MIB Manager` as the main page for loading
+The current `2.0.1` release UI keeps `MIB Manager` as the main page for loading
 and maintaining MIB files.
 
 ## What The Page Covers
@@ -52,6 +52,17 @@ The status section shows:
 
 Use this section after every upload or reload so you do not assume a file was
 accepted just because the HTTP request succeeded.
+
+In `2.0.1`, the status model has two distinct views:
+
+- `All modules` / active bundle stays deduplicated to the effective runtime set
+- source-group views use per-source inventory and keep duplicate membership visible
+
+Important rules:
+
+- `shadowed` is informational, not a failed state
+- failed views only include true failures such as `failed`, `missing_deps`, and `invalid`
+- source-group exports follow the selected group membership even when a module is shadowed globally
 
 ## Aggregate Bundle Resolution
 

@@ -17,12 +17,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.core.config import Settings, get_settings
-from app.core.logging import emit_backend_log
 from app.db.session import create_session_factory
 from app.models import AppSetting, BundleModule, BundleSet, CompileRun
 
 SUPPORTED_MIB_SUFFIXES = (".txt", ".mib", ".my")
 _MIB_DEFINITIONS_RE = re.compile(r"^\s*([A-Za-z0-9-]+)\s+DEFINITIONS\s*::=\s*BEGIN", re.MULTILINE)
+_INVALID_COMPILE_ERROR_RE = re.compile(
+    r"(failed to parse mib|parse error|unexpected error .*parse|cannot parse)",
+    re.IGNORECASE,
+)
 BUNDLED_STARTER_MIBS = (
     "IF-MIB",
     "IANAifType-MIB",
@@ -33,6 +36,16 @@ BUNDLED_STARTER_MIBS = (
     "SNMPv2-TC",
 )
 logger = logging.getLogger(__name__)
+_LOG_PREVIEW_LIMIT = 10
+
+
+def _preview_items(items: list[str], *, limit: int = _LOG_PREVIEW_LIMIT) -> str:
+    normalized = [str(item).strip() for item in items if str(item).strip()]
+    if not normalized:
+        return ""
+    if len(normalized) <= limit:
+        return ", ".join(normalized)
+    return f"{', '.join(normalized[:limit])}, +{len(normalized) - limit} more"
 
 
 class BundleServiceError(RuntimeError):
@@ -126,6 +139,7 @@ class BundleService:
     def compile_bundle(self, request: BundleCompileRequest) -> dict[str, Any]:
         mib_names = self._unique_mib_names(request.mib_names)
         source_dirs = self._resolve_source_dirs(request.mib_dirs)
+        selected_source_paths = self._selected_source_paths(mib_names, source_dirs)
 
         with self.session_factory() as session:
             compile_run = CompileRun(
@@ -145,35 +159,35 @@ class BundleService:
             compile_meta = {
                 "mib_names": mib_names,
                 "source_dirs": [str(p) for p in source_dirs],
+                "selected_source_paths": selected_source_paths,
                 "output_dir": str(bundle_dir),
                 "online": request.online,
                 "remote_sources": request.remote_sources or [],
             }
-            compile_run.command_json = compile_meta
+            compile_run.command_json = dict(compile_meta)
             compile_run.bundle_key = bundle_key
             compile_run.output_dir = str(bundle_dir)
             session.commit()
-
-            logger.info(
-                "Starting bundle compile %s for modules=%s source_dirs=%s output_dir=%s",
-                bundle_key,
-                mib_names,
-                [str(p) for p in source_dirs],
-                bundle_dir,
-            )
-            emit_backend_log(
-                (
-                    f"Starting bundle compile {bundle_key} for modules={mib_names} "
-                    f"source_dirs={[str(p) for p in source_dirs]} output_dir={bundle_dir}"
-                ),
-                logger_name="app.services.bundles",
-                settings=self.settings,
-            )
 
             normalized_sources = [
                 str(s).strip() for s in (request.remote_sources or []) if str(s).strip()
             ]
             use_http = request.online or bool(normalized_sources)
+            logger.info(
+                "Starting bundle compile %s modules=%d source_dirs=%d remote_fetch=%s output_dir=%s",
+                bundle_key,
+                len(mib_names),
+                len(source_dirs),
+                use_http,
+                bundle_dir,
+            )
+            logger.debug(
+                "Bundle compile %s detail: modules=%s source_dirs=%s remote_sources=%s",
+                bundle_key,
+                mib_names,
+                [str(p) for p in source_dirs],
+                normalized_sources,
+            )
             config = CompilerConfig(
                 output_dir=bundle_dir,
                 cache_dir=self.settings.tsmi_cache_dir,
@@ -208,6 +222,7 @@ class BundleService:
 
             failed = [r for r in results if r.status == "failed"]
             missing = [r for r in results if r.status == "missing"]
+            compile_meta["result_rows"] = self._compile_result_rows(results, source_dirs)
             compile_run.finished_at = datetime.now(timezone.utc)
 
             if failed or missing:
@@ -220,13 +235,25 @@ class BundleService:
                 error_text = "; ".join(error_parts) or "tsmi compile failed"
                 compile_run.status = "failed"
                 compile_run.error_text = error_text
+                compile_run.command_json = dict(compile_meta)
                 session.commit()
-                logger.error("Bundle compile failed for %s: %s", bundle_key, error_text)
-                emit_backend_log(
-                    f"Bundle compile failed for {bundle_key}: {error_text}",
-                    level="ERROR",
-                    logger_name="app.services.bundles",
-                    settings=self.settings,
+                logger.error(
+                    "Bundle compile failed for %s failed=%d missing=%d error=%s",
+                    bundle_key,
+                    len(failed),
+                    len(missing),
+                    error_text,
+                )
+                if missing_deps:
+                    logger.warning(
+                        "Bundle compile %s unresolved dependencies: %s",
+                        bundle_key,
+                        _preview_items(missing_deps),
+                    )
+                logger.debug(
+                    "Bundle compile %s failure detail: result_rows=%s",
+                    bundle_key,
+                    compile_meta["result_rows"],
                 )
                 raise BundleServiceError(error_text)
 
@@ -265,29 +292,32 @@ class BundleService:
             compile_run.manifest_path = str(manifest_path)
             compile_run.oid_index_path = str(oid_index_path)
             compile_run.status = "succeeded"
+            compile_run.command_json = dict(compile_meta)
             session.commit()
             session.refresh(bundle_set)
             session.refresh(compile_run)
+            remote_modules = sorted(
+                module.module_name
+                for module in bundle_set.modules
+                if not module.source_path
+            )
 
             logger.info(
-                "Bundle compile succeeded for %s with %d modules",
+                "Bundle compile succeeded for %s modules=%d remote_modules=%d",
                 bundle_key,
                 len(bundle_set.modules),
+                len(remote_modules),
             )
-            emit_backend_log(
-                f"Bundle compile succeeded for {bundle_key} with {len(bundle_set.modules)} modules",
-                logger_name="app.services.bundles",
-                settings=self.settings,
+            logger.debug(
+                "Bundle compile %s detail: remote_modules=%s",
+                bundle_key,
+                remote_modules,
             )
 
             result = {
                 "compile_run": self._compile_run_summary(compile_run),
                 "bundle": self._bundle_summary(bundle_set),
-                "remote_modules": sorted(
-                    module.module_name
-                    for module in bundle_set.modules
-                    if not module.source_path
-                ),
+                "remote_modules": remote_modules,
             }
             bundle_set_id = bundle_set.id
         if request.activate:
@@ -720,6 +750,63 @@ class BundleService:
             return ", ".join(mib_names)
         modules = [module["module"] for module in manifest.get("modules", [])]
         return ", ".join(modules[:3]) or "Compiled bundle"
+
+    def _selected_source_paths(
+        self,
+        mib_names: list[str],
+        source_dirs: list[Path],
+    ) -> dict[str, str | None]:
+        return {
+            module_name: self._find_source_path(module_name, source_dirs)
+            for module_name in self._unique_mib_names(mib_names)
+            if str(module_name or "").strip()
+        }
+
+    def _compile_result_status_label(self, result) -> str:
+        if getattr(result, "missing_dependencies", None):
+            return "missing_deps"
+        raw_status = str(getattr(result, "status", "") or "").strip().lower()
+        if raw_status == "failed" and _INVALID_COMPILE_ERROR_RE.search(str(getattr(result, "error", "") or "")):
+            return "invalid"
+        if raw_status in {"compiled", "cached", "missing"}:
+            return raw_status
+        return raw_status or "failed"
+
+    def _compile_result_rows(
+        self,
+        results: list[Any],
+        source_dirs: list[Path],
+    ) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        source_paths = self._selected_source_paths(
+            [
+                str(getattr(result, "name", "") or "").strip()
+                for result in results
+            ],
+            source_dirs,
+        )
+        for result in results:
+            name = str(getattr(result, "name", "") or "").strip()
+            raw_status = str(getattr(result, "status", "") or "").strip().lower()
+            if raw_status in {"compiled", "cached"}:
+                continue
+            missing_dependencies = [
+                str(dep).strip()
+                for dep in (getattr(result, "missing_dependencies", None) or [])
+                if str(dep).strip()
+            ]
+            rows.append(
+                {
+                    "name": name,
+                    "status": raw_status,
+                    "status_label": self._compile_result_status_label(result),
+                    "error": str(getattr(result, "error", "") or "").strip() or None,
+                    "missing_dependencies": missing_dependencies,
+                    "is_dependency": bool(getattr(result, "is_dependency", False)),
+                    "source_path": source_paths.get(name),
+                }
+            )
+        return rows
 
     def _find_source_path(self, module_name: str, source_dirs: list[Path]) -> str | None:
         candidates = [f"{module_name}{suffix}" for suffix in SUPPORTED_MIB_SUFFIXES]

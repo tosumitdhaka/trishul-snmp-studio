@@ -81,6 +81,7 @@ def test_walk_route_delegates_request_flags_and_returns_service_payload(isolated
     assert calls[0]["target"] == "127.0.0.1"
     assert calls[0]["parse"] is True
     assert calls[0]["use_mibs"] is True
+    assert calls[0]["json_format"] == "flat"
     assert calls[0]["runtime_service"] is runtime
     assert calls[1]["oid"] == "SNMPv2-MIB::sysName"
     assert calls[1]["parse"] is False

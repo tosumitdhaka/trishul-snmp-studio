@@ -114,6 +114,7 @@ def test_format_trap_event_accepts_runtime_event_payload(isolated_db):
             "source_address": {"host": "127.0.0.1", "port": 51589},
             "notification_oid": "1.3.6.1.6.3.1.1.5.3",
             "notification_name": "IF-MIB::linkDown",
+            "resolve_mibs": True,
             "pdu_type": "snmpv2-trap",
             "varbinds": [
                 {
@@ -130,6 +131,7 @@ def test_format_trap_event_accepts_runtime_event_payload(isolated_db):
     assert payload["id"] == 7
     assert payload["source"] == "127.0.0.1:51589"
     assert payload["trap_type"] == "linkDown"
+    assert payload["resolve_mibs"] is True
     assert payload["varbinds"][0]["name"] == "SNMPv2-MIB::sysUpTime.0"
 
 
@@ -231,8 +233,10 @@ def test_list_snapshot_and_clear_events_cover_history_paths(isolated_db):
         "id": 5,
         "recorded_at": "2026-05-13T06:06:00Z",
         "notification_oid": "1.3.6.1.6.3.1.1.5.3",
+        "resolve_mibs": False,
         "event": {
             "source_address": {"host": "127.0.0.1"},
+            "resolve_mibs": False,
             "varbinds": [
                 {
                     "oid": "1.3.6.1.2.1.1.3.0",
@@ -257,13 +261,15 @@ def test_list_snapshot_and_clear_events_cover_history_paths(isolated_db):
     listed = traps_service.list_events(state=state, history_service=history, limit=5)
     assert listed["count"] == 1
     assert listed["data"][0]["source"] == "127.0.0.1"
-    assert listed["data"][0]["trap_type"] == "linkDown"
-    assert listed["data"][0]["resolved"] is True
-    assert listed["data"][0]["varbinds"][0]["name"] == "SNMPv2-MIB::sysUpTime.0"
+    assert listed["data"][0]["trap_type"] == "1.3.6.1.6.3.1.1.5.3"
+    assert listed["data"][0]["resolve_mibs"] is False
+    assert listed["data"][0]["resolved"] is False
+    assert listed["data"][0]["varbinds"][0]["name"] == "1.3.6.1.2.1.1.3.0"
 
     snapshot = traps_service.get_trap_event_snapshot(item, state=state, history_service=history)
     assert snapshot["id"] == 5
     assert snapshot["time_str"] == "06:06:00"
+    assert snapshot["resolve_mibs"] is False
 
     with session_factory() as session:
         session.add(

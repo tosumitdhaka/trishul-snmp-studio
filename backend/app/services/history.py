@@ -250,6 +250,7 @@ class EventHistoryService:
     def _event_summary(self, row: NotificationEvent) -> dict[str, Any]:
         event = row.event_json or {}
         varbinds = event.get("varbinds")
+        resolve_mibs = event.get("resolve_mibs")
         return {
             "id": row.id,
             "bundle_set_id": row.bundle_set_id,
@@ -266,6 +267,7 @@ class EventHistoryService:
             "payload_available": row.payload_hex is not None,
             "varbind_count": len(varbinds) if isinstance(varbinds, list) else 0,
             "varbinds": varbinds if isinstance(varbinds, list) else [],
+            "resolve_mibs": resolve_mibs if isinstance(resolve_mibs, bool) else None,
             "recorded_at": row.recorded_at.isoformat() if row.recorded_at is not None else None,
         }
 

@@ -68,7 +68,6 @@ async def get_stats(
             "upload_count": upload_count,
             "reload_count": state.counter(_MIB_RELOAD_COUNT_KEY),
         },
-        "runtime": runtime_state,
     }
 
 

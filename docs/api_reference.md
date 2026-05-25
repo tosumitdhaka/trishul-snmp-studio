@@ -1,6 +1,6 @@
 # API Reference
 
-This is the practical API reference for the current `2.0.0` runtime.
+This is the practical API reference for the current `2.0.1` runtime.
 
 For complete request and response schemas, use the OpenAPI document served by
 the running app at `/docs`.
@@ -116,6 +116,17 @@ Send request:
 - `DELETE /api/mibs/file` — delete one uploaded MIB file (body: `{"path": "..."}`)
 - `POST /api/mibs/delete-batch` — delete multiple uploaded MIB files
 - `DELETE /api/mibs/{filename:path}` — delete by path (URL-encoded)
+
+`GET /api/mibs/status` returns both the deduplicated effective runtime view and
+the per-source inventory view:
+
+- `mibs` and `active_modules` — the same deduplicated active module list
+- `errors` and `failed_modules` — the same true-failure list
+- `source_inventory` — per-source membership and status, including `shadowed` rows
+- `source_groups` — source-group totals derived from the stored inventory
+
+Source-group export requests keep source-group membership. Global or all-module
+exports stay deduplicated to the active runtime bundle.
 
 Upload request (multipart):
 - field: `files[]` — one or more `.mib`, `.txt`, or `.my` files

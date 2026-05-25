@@ -42,6 +42,7 @@ async def test_get_stats_prefers_runtime_configured_object_count(isolated_db, mo
     assert stats["mibs"]["upload_count"] == 0
     assert "walker" in stats
     assert "mibs" in stats
+    assert "runtime" not in stats
 
 
 @pytest.mark.asyncio

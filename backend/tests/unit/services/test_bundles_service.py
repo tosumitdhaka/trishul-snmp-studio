@@ -55,6 +55,51 @@ def test_compile_bundle_stores_metadata_not_subprocess_command(isolated_db):
     assert "SNMPv2-MIB" in command["mib_names"]
 
 
+def test_compile_bundle_failure_persists_result_source_paths(isolated_db):
+    from app.models import CompileRun
+    from app.services.bundles import BundleCompileRequest, BundleService, BundleServiceError
+
+    settings = isolated_db["settings"]
+    source_dir = settings.data_dir / "mibs" / "vendor"
+    source_dir.mkdir(parents=True, exist_ok=True)
+    broken_path = source_dir / "BROKEN-MIB.mib"
+    broken_path.write_text(
+        """
+BROKEN-MIB DEFINITIONS ::= BEGIN
+
+brokenNode OBJECT IDENTIFIER ::= { 1 3 6 1 4 1 99999
+
+END
+""".strip()
+        + "\n"
+    )
+
+    service = BundleService(settings)
+    with pytest.raises(BundleServiceError, match="Failed to parse MIB"):
+        service.compile_bundle(
+            BundleCompileRequest(
+                mib_names=["BROKEN-MIB"],
+                mib_dirs=[str(source_dir)],
+            )
+        )
+
+    with isolated_db["session_factory"]() as session:
+        compile_run = session.scalar(select(CompileRun).order_by(CompileRun.id.desc()))
+
+    assert compile_run is not None
+    assert isinstance(compile_run.command_json, dict)
+    assert compile_run.command_json["selected_source_paths"]["BROKEN-MIB"] == str(broken_path)
+    assert len(compile_run.command_json["result_rows"]) == 1
+    result_row = compile_run.command_json["result_rows"][0]
+    assert result_row["name"] == "BROKEN-MIB"
+    assert result_row["status"] == "failed"
+    assert result_row["status_label"] == "invalid"
+    assert "Failed to parse MIB" in result_row["error"]
+    assert result_row["missing_dependencies"] == []
+    assert result_row["is_dependency"] is False
+    assert result_row["source_path"] == str(broken_path)
+
+
 def test_activate_and_rollback_switch_active_bundle_pointer(isolated_db):
     from app.services.bundles import BundleCompileRequest, BundleService
 

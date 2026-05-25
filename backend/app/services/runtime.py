@@ -369,7 +369,9 @@ class RuntimeService:
     def _record_responder_request(self, request: SnmpMessage, response: SnmpMessage) -> None:
         self._responder_request_count += 1
         self._responder_last_activity = datetime.now(timezone.utc).isoformat()
-        self._append_simulator_activity(self._build_simulator_activity_entry(request, response))
+        activity = self._build_simulator_activity_entry(request, response)
+        self._append_simulator_activity(activity)
+        self._emit_runtime_log(str(activity.get("message") or "Simulator request served."))
         schedule_stats_broadcast(settings=self.settings)
 
     async def stop_responder(self) -> dict[str, Any]:
@@ -998,6 +1000,15 @@ class RuntimeService:
                     event,
                     direction="received",
                 )
+                try:
+                    from app.services.state_store import _TRAP_RESOLVE_MIBS_KEY
+                    from app.services.state_store import get_state_store
+
+                    snap = get_state_store().snapshot()
+                    resolve_mibs = bool(snap.get(_TRAP_RESOLVE_MIBS_KEY, True))
+                except Exception:
+                    resolve_mibs = True
+                event_payload["resolve_mibs"] = resolve_mibs
                 decorated_event = self._persist_event(
                     event_payload=event_payload,
                     bundle_set_id=self._listener_binding.bundle_set_id if self._listener_binding is not None else None,
@@ -1007,10 +1018,6 @@ class RuntimeService:
                 try:
                     from app.services.bundle_state import get_bundle
                     from app.services.traps_service import _format_trap_event
-                    from app.services.state_store import get_state_store
-                    from app.services.state_store import _TRAP_RESOLVE_MIBS_KEY
-                    snap = get_state_store().snapshot()
-                    resolve_mibs = bool(snap.get(_TRAP_RESOLVE_MIBS_KEY, True))
                     trap_payload = _format_trap_event(
                         decorated_event, resolve_mibs=resolve_mibs, bundle=get_bundle()
                     )
@@ -1023,8 +1030,9 @@ class RuntimeService:
                 notification = event_payload.get("notification_name") or event_payload.get("notification_oid") or "trap"
                 self._emit_runtime_log(
                     (
-                        f"Trap received from {source.get('host') or '-'}:{source.get('port') or '-'} "
-                        f"notification={notification} varbinds={len(event_payload.get('varbinds') or [])}"
+                        f"Received trap \"{notification}\" from "
+                        f"{source.get('host') or '-'}:{source.get('port') or '-'} "
+                        f"varbinds={len(event_payload.get('varbinds') or [])}"
                     ),
                 )
         except asyncio.CancelledError:
@@ -1616,10 +1624,11 @@ class RuntimeService:
         if request_count > 1:
             extra = f" (+{request_count - 1} more requested)"
         now = datetime.now()
+        oid_label = "OID" if oid_count == 1 else "OIDs"
         return {
             "time": now.strftime("%H:%M:%S"),
             "level": "info",
-            "message": f"{request_type} served {oid_count} OIDs{target}{extra}",
+            "message": f"Simulator {request_type} simulated {oid_count} {oid_label}{target}{extra}",
             "request_type": request_type,
             "oid_count": oid_count,
             "request_count": request_count,

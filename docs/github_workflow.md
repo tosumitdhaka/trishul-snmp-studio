@@ -48,12 +48,12 @@ Recommended groups:
 
 - type: `type:feature`, `type:fix`, `type:docs`, `type:release`
 - area: `area:backend`, `area:frontend`, `area:docs`, `area:runtime`, `area:packaging`
-- release: `release:2.0.0` or `release:post-2.0`
+- release: `release:2.0.x` or `release:post-2.0`
 
 ## Milestones
 
-- `v2.0.0`
-- `post-v2.0.0`
+- `v2.0.x`
+- `post-v2.0.x`
 
 Each issue belongs to one milestone only.
 

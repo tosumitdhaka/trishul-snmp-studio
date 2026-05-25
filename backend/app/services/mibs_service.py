@@ -5,6 +5,7 @@ from collections import OrderedDict
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any
 
 from app.core.config import Settings
@@ -34,6 +35,155 @@ def _invalidate_source_cache() -> None:
 
 def _log(message: str, settings: Settings, *, level: str = "INFO") -> None:
     emit_backend_log(message, level=level, logger_name="app.operations", settings=settings)
+
+
+_EXPORT_SLUG_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _slug_fragment(value: str | None, *, fallback: str) -> str:
+    normalized = _EXPORT_SLUG_RE.sub("-", str(value or "").strip())
+    normalized = normalized.strip(" ._-").lower()
+    return normalized or fallback
+
+
+def _export_basename(payload: dict[str, Any], *, export_type: str) -> str:
+    filters = payload.get("filters") or {}
+    metadata = payload.get("metadata") or {}
+    notifications = payload.get("notifications") or []
+    modules = payload.get("modules") or []
+
+    if export_type == "notifications" and len(notifications) == 1:
+        notification_name = (
+            notifications[0].get("full_name")
+            or notifications[0].get("name")
+            or "notification"
+        )
+        return f"notification-{_slug_fragment(notification_name, fallback='notification')}"
+
+    requested_source_groups = filters.get("requested_source_groups") or []
+    if len(requested_source_groups) == 1:
+        scope = requested_source_groups[0]
+    elif len(modules) == 1:
+        scope = modules[0].get("module_name") or modules[0].get("name")
+    else:
+        scope = metadata.get("bundle_label") or metadata.get("bundle_key") or "active-bundle"
+
+    return (
+        f"{_slug_fragment(export_type, fallback='catalog')}-"
+        f"{_slug_fragment(scope, fallback='active-bundle')}"
+    )
+
+
+def _bundle_summary_details(bundle_service) -> tuple[dict[str, dict[str, Any]], str, str]:
+    bundle_summary = bundle_service.get_effective_bundle_summary() or {}
+    bundle_label = str(bundle_summary.get("label") or bundle_summary.get("bundle_key") or "active-bundle")
+    bundle_key = str(bundle_summary.get("bundle_key") or "")
+    bundle_modules = {
+        str(module.get("module_name") or ""): module
+        for module in (bundle_summary.get("modules") or [])
+        if str(module.get("module_name") or "").strip()
+    }
+    return bundle_modules, bundle_label, bundle_key
+
+
+def _bundle_source_path_for_module(module_name: str, *, bundle_modules, source_svc) -> Path | None:
+    bundle_module = bundle_modules.get(module_name) or {}
+    raw_source_path = str(bundle_module.get("source_path") or "").strip()
+    if raw_source_path:
+        return Path(raw_source_path)
+    return source_svc.source_path_for_module(module_name)
+
+
+def _source_details_for_path(source_path: Path | None, *, source_svc) -> dict[str, str]:
+    if source_path is None:
+        return {
+            "source_group": "",
+            "source_kind": "",
+            "source_relative_path": "",
+        }
+
+    source_kind = source_svc.module_source_kind(source_path)
+    return {
+        "source_group": source_svc.source_group_for_path(source_path, source_kind=source_kind),
+        "source_kind": source_kind,
+        "source_relative_path": source_svc.source_relative_path(source_path, source_kind=source_kind),
+    }
+
+
+def _compile_run_source_path_for_module(
+    module_name: str,
+    *,
+    run_source_dirs: list[str] | None,
+    source_svc,
+) -> Path | None:
+    normalized_name = str(module_name or "").strip()
+    if not normalized_name:
+        return None
+
+    for raw_directory in run_source_dirs or []:
+        directory = Path(str(raw_directory or "")).expanduser()
+        if not directory.exists() or not directory.is_dir():
+            continue
+        for path in source_svc.iter_source_files(directory, recursive=False):
+            if path.stem == normalized_name:
+                return path
+            try:
+                text = path.read_text(errors="ignore")
+            except OSError:
+                continue
+            if source_svc.extract_mib_name(path.name, text) == normalized_name:
+                return path
+
+    return source_svc.source_path_for_module(normalized_name)
+
+
+def _source_group_summary(
+    *,
+    uploaded_inventory: list[dict[str, Any]],
+    active_modules: list[dict[str, Any]],
+    managed_source_kinds: set[str],
+    root_upload_source_group: str,
+) -> list[dict[str, Any]]:
+    by_group: dict[str, dict[str, Any]] = {}
+
+    for entry in uploaded_inventory:
+        group = str(entry.get("group") or root_upload_source_group)
+        bucket = by_group.setdefault(
+            group,
+            {"name": group, "file_count": 0, "mib_names": set(), "active_module_count": 0},
+        )
+        bucket["file_count"] += 1
+        mib_name = str(entry.get("mib_name") or "").strip()
+        if mib_name:
+            bucket["mib_names"].add(mib_name)
+
+    for module in active_modules or []:
+        if str(module.get("source_kind") or "").lower() not in managed_source_kinds:
+            continue
+        group = str(module.get("source_group") or root_upload_source_group)
+        bucket = by_group.setdefault(
+            group,
+            {"name": group, "file_count": 0, "mib_names": set(), "active_module_count": 0},
+        )
+        bucket["active_module_count"] += 1
+
+    return [
+        {
+            "name": payload["name"],
+            "file_count": payload["file_count"],
+            "mib_count": len(payload["mib_names"]),
+            "active_module_count": payload["active_module_count"],
+        }
+        for payload in sorted(by_group.values(), key=lambda item: item["name"])
+    ]
+
+
+def _compile_run_result_rows(compile_run) -> list[dict[str, Any]]:
+    command = compile_run.command_json if isinstance(compile_run.command_json, dict) else {}
+    rows = command.get("result_rows")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
 
 
 def _make_source_service(settings: Settings, state: StateStore, bundle_service):
@@ -106,6 +256,7 @@ def get_status(
     from app.services.mib_sources import (
         BASE_IMPORT_MODULES,
         MANAGED_UPLOAD_SOURCE_KINDS,
+        ROOT_UPLOAD_SOURCE_GROUP,
     )
 
     def _imports_for_source(source_path: Path | None) -> list[str]:
@@ -118,16 +269,25 @@ def get_status(
         return source_svc.extract_imported_modules(text)
 
     bundle = get_bundle()
-    rows_by_module: dict[str, dict[str, Any]] = {}
+    uploaded_inventory = source_svc.uploaded_source_inventory()
+    bundle_modules, _, _ = _bundle_summary_details(bundle_service)
+
+    rows_by_module: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
     active_uploaded_paths: set[str] = set()
     active_uploaded_sources_by_module: dict[str, dict[str, Any]] = {}
+    active_rows_by_path: dict[str, dict[str, Any]] = {}
     if bundle is not None:
         for mod_name, mod_record in bundle.modules.items():
-            source_path = source_svc.source_path_for_module(mod_name)
-            if source_path is not None and source_path.exists():
-                source_kind = source_svc.module_source_kind(source_path)
-                source_group = source_svc.source_group_for_path(source_path, source_kind=source_kind)
-                relative_path = source_svc.source_relative_path(source_path, source_kind=source_kind)
+            source_path = _bundle_source_path_for_module(
+                mod_name,
+                bundle_modules=bundle_modules,
+                source_svc=source_svc,
+            )
+            if source_path is not None:
+                source_details = _source_details_for_path(source_path, source_svc=source_svc)
+                source_kind = source_details["source_kind"] or "compiled"
+                source_group = source_details["source_group"]
+                relative_path = source_details["source_relative_path"]
                 deletable = source_kind in MANAGED_UPLOAD_SOURCE_KINDS
                 builtin = source_kind == "bundled" or not deletable
                 file_name = source_path.name
@@ -151,11 +311,13 @@ def get_status(
                 "deletable": deletable,
                 "source_kind": source_kind,
                 "source_group": source_group,
+                "status": "active",
             }
             rows_by_module[mod_name] = row_payload
             if deletable and relative_path:
                 active_uploaded_paths.add(relative_path)
                 active_uploaded_sources_by_module[mod_name] = row_payload
+                active_rows_by_path[relative_path] = row_payload
 
     from sqlalchemy import select
     from app.models import CompileRun
@@ -168,71 +330,155 @@ def get_status(
             .limit(5)
         ).all()
         for run in failed_runs:
+            run_result_rows = _compile_run_result_rows(run)
+            if run_result_rows:
+                for result_row in run_result_rows:
+                    row_status = str(result_row.get("status_label") or "").strip().lower()
+                    if row_status not in {"failed", "invalid", "missing_deps"}:
+                        continue
+                    raw_source_path = str(result_row.get("source_path") or "").strip()
+                    if not raw_source_path:
+                        continue
+                    source_path = Path(raw_source_path)
+                    source_details = _source_details_for_path(source_path, source_svc=source_svc)
+                    source_kind = source_details["source_kind"]
+                    if source_kind not in MANAGED_UPLOAD_SOURCE_KINDS:
+                        continue
+                    relative_path = source_details["source_relative_path"] or source_path.name
+                    if relative_path in active_uploaded_paths or relative_path in error_rows_by_path:
+                        continue
+                    missing_deps = bundle_service._unique_mib_names(
+                        [
+                            str(dep).strip()
+                            for dep in (result_row.get("missing_dependencies") or [])
+                            if str(dep).strip()
+                        ]
+                    )
+                    error_rows_by_path[relative_path] = {
+                        "name": str(result_row.get("name") or source_path.stem),
+                        "file": relative_path,
+                        "relative_path": relative_path,
+                        "objects": 0,
+                        "traps": 0,
+                        "imports": _imports_for_source(source_path),
+                        "builtin": False,
+                        "error": str(result_row.get("error") or run.error_text or "Compile failed."),
+                        "status": "missing_deps" if missing_deps else row_status,
+                        "missing_deps": missing_deps,
+                        "deletable": True,
+                        "source_kind": source_kind,
+                        "source_group": source_details["source_group"],
+                    }
+                continue
+
             requested = bundle_service._unique_mib_names(run.requested_mib_names_json or [])
             missing_deps = source_svc.missing_dependencies_from_error(run.error_text)
             status_label = "missing_deps" if missing_deps else "failed"
             for name in requested or [run.bundle_key or "compile-run"]:
                 if name in rows_by_module:
                     continue
-                source_path = source_svc.source_path_for_module(name)
-                if source_path is None or not source_path.exists():
+                source_path = _compile_run_source_path_for_module(
+                    name,
+                    run_source_dirs=run.source_dirs_json,
+                    source_svc=source_svc,
+                )
+                if source_path is None:
                     continue
-                source_kind = source_svc.module_source_kind(source_path)
+                source_details = _source_details_for_path(source_path, source_svc=source_svc)
+                source_kind = source_details["source_kind"]
                 if source_kind not in MANAGED_UPLOAD_SOURCE_KINDS:
                     continue
-                relative_path = source_svc.relative_upload_path(source_path) or source_path.name
+                relative_path = source_details["source_relative_path"] or source_path.name
                 if relative_path in active_uploaded_paths or relative_path in error_rows_by_path:
                     continue
                 error_rows_by_path[relative_path] = {
                     "name": name,
                     "file": relative_path,
+                    "relative_path": relative_path,
+                    "objects": 0,
+                    "traps": 0,
+                    "imports": _imports_for_source(source_path),
+                    "builtin": False,
                     "error": run.error_text or "Compile failed.",
                     "status": status_label,
                     "missing_deps": missing_deps,
                     "deletable": True,
                     "source_kind": source_kind,
-                    "source_group": source_svc.source_group_for_path(source_path, source_kind=source_kind),
+                    "source_group": source_details["source_group"],
                 }
 
     available_names = source_svc.available_source_mib_names()
-    for entry in source_svc.uploaded_source_inventory():
+    source_inventory_rows_by_path: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+    for entry in uploaded_inventory:
         relative_path = str(entry.get("relative_path") or "").strip()
-        if not relative_path or relative_path in active_uploaded_paths or relative_path in error_rows_by_path:
+        if not relative_path or relative_path in source_inventory_rows_by_path:
             continue
         source_path = Path(entry["path"])
         source_kind = source_svc.module_source_kind(source_path)
-        if source_kind != "uploaded":
+        if source_kind not in MANAGED_UPLOAD_SOURCE_KINDS:
             continue
+        source_group = str(entry.get("group") or ROOT_UPLOAD_SOURCE_GROUP)
         mib_name = str(entry.get("mib_name") or Path(relative_path).stem)
+        imports = _imports_for_source(source_path)
+        base_row = {
+            "name": mib_name,
+            "file": relative_path,
+            "relative_path": relative_path,
+            "objects": 0,
+            "traps": 0,
+            "imports": imports,
+            "builtin": False,
+            "deletable": True,
+            "source_kind": source_kind,
+            "source_group": source_group,
+            "status": "pending",
+            "missing_deps": [],
+        }
+
+        active_row = active_rows_by_path.get(relative_path)
+        if active_row is not None:
+            source_inventory_rows_by_path[relative_path] = {
+                **active_row,
+                "file": relative_path,
+                "relative_path": relative_path,
+                "status": "active",
+            }
+            continue
+
         active_source = active_uploaded_sources_by_module.get(mib_name)
         if active_source is not None and active_source.get("relative_path") != relative_path:
             active_relative_path = str(active_source.get("relative_path") or "")
-            error_rows_by_path[relative_path] = {
-                "name": mib_name,
-                "file": relative_path,
+            source_inventory_rows_by_path[relative_path] = {
+                **base_row,
+                "objects": int(active_source.get("objects") or 0),
+                "traps": int(active_source.get("traps") or 0),
                 "error": (
                     "Another stored source for this MIB is active: "
                     f"{active_relative_path}. This copy is currently shadowed; "
                     "delete the duplicate or replace the active source."
                 ),
                 "status": "shadowed",
-                "missing_deps": [],
-                "deletable": True,
-                "source_kind": source_kind,
-                "source_group": str(entry.get("group") or ""),
                 "active_relative_path": active_relative_path,
             }
             continue
 
-        imports = _imports_for_source(source_path)
+        failure_row = error_rows_by_path.get(relative_path)
+        if failure_row is not None:
+            source_inventory_rows_by_path[relative_path] = {
+                **base_row,
+                **failure_row,
+                "file": relative_path,
+                "relative_path": relative_path,
+            }
+            continue
+
         missing_deps = [
             module_name
             for module_name in imports
             if module_name not in available_names and module_name not in BASE_IMPORT_MODULES
         ]
-        error_rows_by_path[relative_path] = {
-            "name": mib_name,
-            "file": relative_path,
+        source_inventory_rows_by_path[relative_path] = {
+            **base_row,
             "error": (
                 "Stored source is not part of the active bundle. "
                 + (
@@ -243,18 +489,29 @@ def get_status(
             ),
             "status": "missing_deps" if missing_deps else "pending",
             "missing_deps": missing_deps,
-            "deletable": True,
-            "source_kind": source_kind,
-            "source_group": str(entry.get("group") or ""),
         }
 
-    mibs = list(rows_by_module.values())
+    active_modules = list(rows_by_module.values())
+    source_inventory = list(source_inventory_rows_by_path.values())
+    failed_modules = [
+        row
+        for row in source_inventory
+        if str(row.get("status") or "").lower() in {"failed", "missing_deps", "invalid"}
+    ]
     return {
-        "loaded": len(mibs),
-        "failed": len(error_rows_by_path),
-        "mibs": mibs,
-        "errors": list(error_rows_by_path.values()),
-        "source_groups": source_svc.source_group_summary(mibs),
+        "loaded": len(active_modules),
+        "failed": len(failed_modules),
+        "mibs": active_modules,
+        "active_modules": active_modules,
+        "errors": failed_modules,
+        "failed_modules": failed_modules,
+        "source_inventory": source_inventory,
+        "source_groups": _source_group_summary(
+            uploaded_inventory=uploaded_inventory,
+            active_modules=active_modules,
+            managed_source_kinds=MANAGED_UPLOAD_SOURCE_KINDS,
+            root_upload_source_group=ROOT_UPLOAD_SOURCE_GROUP,
+        ),
     }
 
 
@@ -354,16 +611,84 @@ def export_catalog(
     if bundle is None:
         raise MibsError("No active MIB bundle is loaded.")
     from trishul_snmp.mib.registry import oid_to_string
+    from app.services.mib_sources import MANAGED_UPLOAD_SOURCE_KINDS, ROOT_UPLOAD_SOURCE_GROUP
+
+    source_svc = _make_source_service(settings, state, bundle_service)
+    uploaded_inventory = source_svc.uploaded_source_inventory()
+    bundle_modules, bundle_label, bundle_key = _bundle_summary_details(bundle_service)
+    inventory_entries_by_module: dict[str, list[dict[str, Any]]] = {}
+    for entry in uploaded_inventory:
+        mib_name = str(entry.get("mib_name") or "").strip()
+        if mib_name:
+            inventory_entries_by_module.setdefault(mib_name, []).append(entry)
 
     mod_filter = set(modules) if modules else None
     notif_filter = set(notifications) if notifications else None
+    requested_source_groups: list[str] = []
+    for group in source_groups or []:
+        normalized_group = source_svc.normalize_source_group(group)
+        if normalized_group and normalized_group not in requested_source_groups:
+            requested_source_groups.append(normalized_group)
+    source_group_filter = set(requested_source_groups) if requested_source_groups else None
 
     result_modules = []
     result_notifications = []
     result_objects = []
 
+    def module_source_details(module_name: str) -> dict[str, str] | None:
+        source_path = _bundle_source_path_for_module(
+            module_name,
+            bundle_modules=bundle_modules,
+            source_svc=source_svc,
+        )
+        memberships: list[dict[str, str]] = []
+        seen_relative_paths: set[str] = set()
+
+        if source_path is not None:
+            active_details = _source_details_for_path(source_path, source_svc=source_svc)
+            memberships.append(active_details)
+            relative_path = active_details.get("source_relative_path") or ""
+            if relative_path:
+                seen_relative_paths.add(relative_path)
+            if active_details.get("source_kind") in MANAGED_UPLOAD_SOURCE_KINDS:
+                for entry in inventory_entries_by_module.get(module_name, []):
+                    relative_path = str(entry.get("relative_path") or "").strip()
+                    if not relative_path or relative_path in seen_relative_paths:
+                        continue
+                    entry_source_path = Path(entry["path"])
+                    source_kind = source_svc.module_source_kind(entry_source_path)
+                    if source_kind not in MANAGED_UPLOAD_SOURCE_KINDS:
+                        continue
+                    memberships.append(
+                        {
+                            "source_group": str(entry.get("group") or ROOT_UPLOAD_SOURCE_GROUP),
+                            "source_kind": source_kind,
+                            "source_relative_path": relative_path,
+                        }
+                    )
+                    seen_relative_paths.add(relative_path)
+
+        if source_group_filter:
+            for requested_group in requested_source_groups:
+                for membership in memberships:
+                    if membership["source_group"] == requested_group:
+                        return membership
+            return None
+
+        if memberships:
+            return memberships[0]
+
+        return {
+            "source_group": "",
+            "source_kind": "",
+            "source_relative_path": "",
+        }
+
     for mod_name, mod_record in bundle.modules.items():
         if mod_filter and mod_name not in mod_filter:
+            continue
+        module_source = module_source_details(mod_name)
+        if module_source is None:
             continue
         mod_notifications = [
             {
@@ -372,6 +697,7 @@ def export_catalog(
                 "full_name": f"{n.module}::{n.name}",
                 "oid": oid_to_string(n.oid),
                 "description": n.description or "",
+                "source_group": module_source["source_group"],
                 "members": [{"module": m.module, "name": m.object} for m in (n.members or [])],
             }
             for n in mod_record.notifications.values()
@@ -387,6 +713,7 @@ def export_catalog(
                 "nodetype": o.nodetype or "",
                 "status": o.status or "",
                 "description": o.description or "",
+                "source_group": module_source["source_group"],
             }
             for o in mod_record.objects.values()
         ]
@@ -394,6 +721,9 @@ def export_catalog(
             "module_name": mod_name,
             "object_count": len(mod_record.objects),
             "notification_count": len(mod_record.notifications),
+            "source_group": module_source["source_group"],
+            "source_kind": module_source["source_kind"],
+            "source_relative_path": module_source["source_relative_path"],
         })
         result_notifications.extend(mod_notifications)
         result_objects.extend(mod_objects)
@@ -416,6 +746,11 @@ def export_catalog(
             "export_type": export_type,
             "requested_modules": list(mod_filter) if mod_filter else [],
             "requested_notifications": list(notif_filter) if notif_filter else [],
+            "requested_source_groups": requested_source_groups,
+        },
+        "metadata": {
+            "bundle_label": bundle_label,
+            "bundle_key": bundle_key,
         },
         "summary": {
             "module_count": len(result_modules),
@@ -450,7 +785,7 @@ def export_catalog_file(
         bundle_service=bundle_service,
     )
     normalized_format = str(format or "json").strip().lower()
-    basename = f"{export_type}"
+    basename = _export_basename(payload, export_type=export_type)
     if normalized_format == "json":
         return {
             "filename": f"{basename}.json",

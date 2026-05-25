@@ -154,17 +154,32 @@ def test_trap_send_route_rejects_invalid_object_identifier_values(isolated_db, m
     assert "VarBind 1 value" in excinfo.value.detail
 
 
-def test_trap_routes_require_auth_and_update_resolve_mibs(isolated_db):
+def test_trap_routes_require_auth_and_update_resolve_mibs(isolated_db, monkeypatch):
     from app.api.routes import traps as traps_module
     from app.services.state_store import _TRAP_RESOLVE_MIBS_KEY, get_state_store
+
+    broadcasts: list[object] = []
 
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(traps_module.get_trap_status(x_auth_token=None))
     assert excinfo.value.status_code == 401
 
-    payload = traps_module.set_resolve_mibs(
-        traps_module.TrapResolveMibsBody(resolve_mibs=False),
-        x_auth_token=_login_token(),
+    monkeypatch.setattr(
+        traps_module,
+        "_ctx",
+        lambda: (isolated_db["settings"], get_state_store(), object()),
+    )
+    async def fake_broadcast_status(*, settings):
+        broadcasts.append(settings)
+
+    monkeypatch.setattr(traps_module, "broadcast_status", fake_broadcast_status)
+
+    payload = asyncio.run(
+        traps_module.set_resolve_mibs(
+            traps_module.TrapResolveMibsBody(resolve_mibs=False),
+            x_auth_token=_login_token(),
+        )
     )
     assert payload == {"resolve_mibs": False}
     assert get_state_store().snapshot()[_TRAP_RESOLVE_MIBS_KEY] is False
+    assert broadcasts == [isolated_db["settings"]]

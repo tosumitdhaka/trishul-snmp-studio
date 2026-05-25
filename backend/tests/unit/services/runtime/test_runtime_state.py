@@ -222,13 +222,22 @@ def test_runtime_helper_branches_cover_singletons_serializers_and_oid_edges(
     reset_runtime_service()
 
 
-def test_runtime_simulator_activity_log_tracks_requests_and_clear(isolated_db):
+def test_runtime_simulator_activity_log_tracks_requests_runtime_logs_and_clear(
+    isolated_db,
+    monkeypatch,
+):
     from app.services.runtime import RuntimeService
     from trishul_snmp.types import IntegerValue, NullValue
     from trishul_snmp.wire.message import SnmpMessage
     from trishul_snmp.wire.pdu import Pdu, PduType, RawVarBind
 
     service = RuntimeService(isolated_db["settings"])
+    runtime_logs: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        service,
+        "_emit_runtime_log",
+        lambda message, *, level="INFO": runtime_logs.append((level, message)),
+    )
     request = SnmpMessage(
         version=1,
         community="public",
@@ -256,8 +265,17 @@ def test_runtime_simulator_activity_log_tracks_requests_and_clear(isolated_db):
     activity = asyncio.run(service.list_simulator_activity(limit=10))
     assert activity["total"] == 1
     assert activity["items"][0]["request_type"] == "GETNEXT"
+    assert activity["items"][0]["message"] == (
+        "Simulator GETNEXT simulated 1 OID from 1.3.6.1.2.1.1 -> 1.3.6.1.2.1.1.1.0"
+    )
     assert activity["items"][0]["first_requested_oid"] == "1.3.6.1.2.1.1"
     assert activity["items"][0]["first_returned_oid"] == "1.3.6.1.2.1.1.1.0"
+    assert runtime_logs == [
+        (
+            "INFO",
+            "Simulator GETNEXT simulated 1 OID from 1.3.6.1.2.1.1 -> 1.3.6.1.2.1.1.1.0",
+        )
+    ]
 
     cleared = asyncio.run(service.clear_simulator_activity())
     assert cleared["status"] == "cleared"

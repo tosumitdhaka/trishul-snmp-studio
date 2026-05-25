@@ -35,8 +35,6 @@ class SPAStaticFiles(StaticFiles):
             return await super().get_response("index.html", scope)
         return response
 
-
-configure_logging(get_settings())
 logger = logging.getLogger(__name__)
 
 _QUIET_GET_API_PATHS = {
@@ -47,15 +45,22 @@ _QUIET_GET_API_PATHS = {
 }
 
 
+def _request_debug_logging_enabled(settings) -> bool:
+    return getattr(logging, str(settings.log_level).upper(), logging.INFO) <= logging.DEBUG
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
-    configure_logging(settings)
+    configure_logging(settings, announce=False)
     from app.db.session import create_session_factory
     init_state_store(create_session_factory(settings.database_url))
     logger.info("Applying database migrations for %s", settings.database_url)
     upgrade_database()
-    logger.info("Backend log file is available at %s", settings.log_dir / "backend.log")
+    if settings.file_logging_enabled:
+        logger.info("Backend log file is available at %s", settings.log_file)
+    else:
+        logger.info("Backend logging is routed to stdout/stderr.")
     bundle_service = BundleService(settings)
     try:
         bootstrap_bundle = bundle_service.ensure_bootstrap_bundle()
@@ -111,14 +116,26 @@ async def lifespan(_: FastAPI):
     except Exception as exc:
         logger.exception("Failed to check autostart settings: %s", exc)
 
-    yield
-
-    await shutdown_runtime_service()
-    engine.dispose()
+    try:
+        yield
+    finally:
+        logger.info("Application shutdown requested.")
+        shutdown_failed = False
+        try:
+            await shutdown_runtime_service()
+        except Exception:
+            shutdown_failed = True
+            logger.exception("Runtime shutdown failed during application shutdown")
+            raise
+        finally:
+            engine.dispose()
+        if not shutdown_failed:
+            logger.info("Application shutdown complete.")
 
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    configure_logging(settings, announce=False)
     application = FastAPI(
         title=settings.app_name,
         version=settings.app_version,
@@ -129,7 +146,7 @@ def create_app() -> FastAPI:
         origin.strip()
         for origin in os.getenv(
             "ALLOWED_ORIGINS",
-            "http://localhost:8080,http://localhost:8000,http://localhost:5173",
+            "http://localhost:8980,http://localhost:8000,http://localhost:5173",
         ).split(",")
         if origin.strip()
     ]
@@ -154,32 +171,33 @@ def create_app() -> FastAPI:
                 f"from {request.client.host if request.client is not None else '-'}"
             )
             emit_backend_log(message, level="ERROR", logger_name="app.http", settings=settings)
-            logger.exception(
-                message
-            )
+            logger.exception(message)
             raise
 
         elapsed_ms = (time.perf_counter() - started_at) * 1000
         quiet_poll = request.method == "GET" and request.url.path in _QUIET_GET_API_PATHS
-        if (request.url.path.startswith("/api") and not quiet_poll) or response.status_code >= 400:
-            level = logging.INFO
-            if response.status_code >= 500:
-                level = logging.ERROR
-            elif response.status_code >= 400:
-                level = logging.WARNING
+        level: int | None = None
+        if response.status_code >= 500:
+            level = logging.ERROR
+        elif response.status_code >= 400:
+            level = logging.WARNING
+        elif (
+            request.url.path.startswith("/api")
+            and not quiet_poll
+            and _request_debug_logging_enabled(settings)
+        ):
+            level = logging.DEBUG
+
+        if level is not None:
             message = (
                 f"HTTP {request.method} {request.url.path} -> {response.status_code} "
                 f"in {elapsed_ms:.2f}ms from {request.client.host if request.client is not None else '-'}"
             )
             emit_backend_log(
                 message,
-                level=logging.getLevelName(level),
+                level=level,
                 logger_name="app.http",
                 settings=settings,
-            )
-            logger.log(
-                level,
-                message,
             )
         return response
 
@@ -194,14 +212,14 @@ def create_app() -> FastAPI:
     else:
         @application.get("/", include_in_schema=False)
         def frontend_placeholder() -> HTMLResponse:
-            return HTMLResponse(
-                """
+            version = settings.app_version
+            html = """
                 <!doctype html>
                 <html lang="en">
                   <head>
                     <meta charset="utf-8" />
                     <meta name="viewport" content="width=device-width, initial-scale=1" />
-                    <title>Trishul SNMP Suite 2.0.0</title>
+                    <title>Trishul SNMP Suite __VERSION__</title>
                     <style>
                       body {
                         font-family: "Trebuchet MS", "Segoe UI", sans-serif;
@@ -228,7 +246,7 @@ def create_app() -> FastAPI:
                   </head>
                   <body>
                     <main>
-                      <p>Trishul SNMP Suite 2.0.0 backend is running.</p>
+                      <p>Trishul SNMP Suite __VERSION__ backend is running.</p>
                       <h1>Frontend build not found.</h1>
                       <p>
                         Run <code>npm install</code> and <code>npm run build</code>
@@ -238,7 +256,7 @@ def create_app() -> FastAPI:
                   </body>
                 </html>
                 """
-            )
+            return HTMLResponse(html.replace("__VERSION__", version))
 
     return application
 

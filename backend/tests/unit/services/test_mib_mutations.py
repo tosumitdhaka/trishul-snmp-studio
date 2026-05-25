@@ -333,8 +333,31 @@ def test_save_uploaded_mibs_covers_success_and_compile_failure_paths(isolated_db
     assert result["results"][1]["status"] == "skipped"
     assert result["dependency_fetch"]["resolved"] == []
     assert result["dependency_fetch"]["failed"] == ["MISSING-DEP-MIB"]
+    info_logs = [message for level, message in ctx["logs"] if level == "INFO"]
+    warning_logs = [message for level, message in ctx["logs"] if level == "WARNING"]
+    debug_logs = [message for level, message in ctx["logs"] if level == "DEBUG"]
+    assert any(
+        "Uploading MIB batch: source_group=common mode=partial received_files=3 saved_files=2 selected_mibs=1 remote_fetch=True"
+        in message
+        for message in info_logs
+    )
+    assert any(
+        "Uploaded MIB batch compiled: source_group=common mode=partial received_files=3 saved_files=2 result_rows=3 loaded=1 skipped=2 failed=0 errors=0 remote_resolved=0 remote_unresolved=1"
+        in message
+        for message in info_logs
+    )
+    assert any(
+        "Upload unresolved remote dependencies: MISSING-DEP-MIB" in message
+        for message in warning_logs
+    )
+    assert any(
+        "Upload MIB batch detail:" in message and "selected_targets=['READY-MIB']" in message
+        for message in debug_logs
+    )
+    assert all("selected_targets=[" not in message for message in info_logs)
+    assert all("compile_targets=[" not in message for message in info_logs)
 
-    failing_service, _settings, failing_bundle_service, _ctx = _make_mutation_service(
+    failing_service, _settings, failing_bundle_service, failing_ctx = _make_mutation_service(
         isolated_db,
         batch=batch,
         remote_policy=remote_policy,
@@ -352,6 +375,20 @@ def test_save_uploaded_mibs_covers_success_and_compile_failure_paths(isolated_db
     assert failed["results"][0]["status"] == "failed"
     assert failed["results"][0]["error"] == "MIB 'MISSING-DEP-MIB' not found"
     assert failed["dependency_fetch"]["failed"] == ["MISSING-DEP-MIB"]
+    assert any(
+        level == "ERROR"
+        and "Uploaded MIB compile failed: source_group=common mode=partial received_files=3 saved_files=2 result_rows=3 loaded=0 skipped=2 failed=1 errors=0 remote_resolved=0 remote_unresolved=1 error=MIB 'MISSING-DEP-MIB' not found"
+        in message
+        for level, message in failing_ctx["logs"]
+    )
+    assert any(
+        level == "ERROR" and "Upload failed MIB modules: READY-MIB" in message
+        for level, message in failing_ctx["logs"]
+    )
+    assert any(
+        level == "WARNING" and "Upload unresolved remote dependencies: MISSING-DEP-MIB" in message
+        for level, message in failing_ctx["logs"]
+    )
 
 
 def test_reload_and_activate_bundled_starter_bundle_cover_main_branches(isolated_db):
@@ -431,6 +468,23 @@ def test_reload_and_activate_bundled_starter_bundle_cover_main_branches(isolated
     assert uploaded_reload["failed"] == 1
     assert uploaded_reload["dependency_fetch"]["resolved"] == ["REMOTE-MIB"]
     assert ctx["materialized"] == [(["REMOTE-MIB"], 404)]
+    assert any(
+        level == "INFO"
+        and "Reloading uploaded MIB bundle: uploaded_mibs=1 remote_fetch=True" in message
+        for level, message in ctx["logs"]
+    )
+    assert any(
+        level == "INFO"
+        and "Reloaded uploaded MIB bundle: uploaded_mibs=1 loaded=5 failed=1 remote_resolved=1 remote_unresolved=0"
+        in message
+        for level, message in ctx["logs"]
+    )
+    assert any(
+        level == "DEBUG"
+        and "Reload uploaded MIB detail: uploaded_mibs=['READY-MIB'] compile_targets=['READY-MIB']"
+        in message
+        for level, message in ctx["logs"]
+    )
 
     failing_reload_service, _settings, failing_reload_bundle_service, _ctx = _make_mutation_service(
         isolated_db,

@@ -67,6 +67,44 @@ def test_upgrade_database_creates_current_schema_and_preserves_rows(monkeypatch,
         reset_runtime_service()
 
 
+def test_upgrade_database_uses_application_log_format_when_preconfigured(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from app.core.config import get_settings, reset_settings_cache
+    from app.core.logging import configure_logging
+    from app.db.migrations import upgrade_database
+    from app.db.session import reset_db_runtime
+    from app.services.runtime import reset_runtime_service
+
+    data_dir = tmp_path / "logging-upgrade-data"
+    monkeypatch.setenv("TRISHUL_DATA_DIR", str(data_dir))
+    monkeypatch.setenv("TRISHUL_CONTAINER", "1")
+    monkeypatch.setenv("LOG_DESTINATION", "stdout")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    reset_settings_cache()
+    reset_db_runtime()
+    reset_runtime_service()
+
+    settings = get_settings()
+    try:
+        configure_logging(settings)
+        capsys.readouterr()
+
+        upgrade_database()
+
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "alembic.runtime.migration:" in combined
+        assert "INFO  [alembic.runtime.migration]" not in combined
+    finally:
+        reset_db_runtime()
+        reset_settings_cache()
+        reset_runtime_service()
+
+
 def test_file_bootstrap_from_1x_layout_supports_v2_state(monkeypatch, tmp_path):
     from app.core.config import get_settings, reset_settings_cache
     from app.db.migrations import upgrade_database

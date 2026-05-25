@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import anyio
+import logging
 import pytest
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -123,11 +124,10 @@ def test_spa_static_files_uses_index_when_static_lookup_raises_404(monkeypatch, 
     assert calls == ["missing/view", "index.html"]
 
 
-def test_create_app_logs_api_requests_and_skips_quiet_polling(isolated_db, monkeypatch):
+def test_create_app_logs_only_debug_or_error_http_requests(isolated_db, monkeypatch):
     import app.main as main_module
 
-    emitted: list[tuple[str, str, str]] = []
-    logged: list[tuple[int, str]] = []
+    emitted: list[tuple[str | int, str, str]] = []
     exceptions: list[str] = []
 
     monkeypatch.setattr(
@@ -136,11 +136,6 @@ def test_create_app_logs_api_requests_and_skips_quiet_polling(isolated_db, monke
         lambda message, *, level="INFO", logger_name="app", settings=None: emitted.append(
             (level, logger_name, message)
         ),
-    )
-    monkeypatch.setattr(
-        main_module.logger,
-        "log",
-        lambda level, message: logged.append((level, message)),
     )
     monkeypatch.setattr(
         main_module.logger,
@@ -178,17 +173,24 @@ def test_create_app_logs_api_requests_and_skips_quiet_polling(isolated_db, monke
         raise RuntimeError("boom")
 
     anyio.run(lambda: dispatch(make_request("/api/meta"), ok_call_next))
-    assert emitted[-1][0] == "INFO"
-    assert emitted[-1][1] == "app.http"
+    assert emitted == []
 
     emitted.clear()
     anyio.run(lambda: dispatch(make_request("/api/simulator/logs"), ok_call_next))
     assert emitted == []
 
     anyio.run(lambda: dispatch(make_request("/api/settings/check"), warn_call_next))
-    assert emitted[-1][0] == "WARNING"
+    assert emitted[-1][0] == logging.WARNING
+    assert emitted[-1][1] == "app.http"
+    assert emitted[-1][2].startswith("HTTP GET /api/settings/check -> 401")
 
     emitted.clear()
+    isolated_db["settings"].log_level = "DEBUG"
+    anyio.run(lambda: dispatch(make_request("/api/meta"), ok_call_next))
+    assert emitted[-1][0] == logging.DEBUG
+    assert emitted[-1][1] == "app.http"
+    assert emitted[-1][2].startswith("HTTP GET /api/meta -> 200")
+
     try:
         anyio.run(lambda: dispatch(make_request("/api/healthz/ui"), error_call_next))
     except RuntimeError:
@@ -196,6 +198,5 @@ def test_create_app_logs_api_requests_and_skips_quiet_polling(isolated_db, monke
     else:
         raise AssertionError("middleware should re-raise unexpected request errors")
 
-    assert emitted[-1][0] == "ERROR"
-    assert logged
-    assert exceptions == [emitted[-1][2]]
+    assert exceptions
+    assert exceptions[-1].startswith("HTTP GET /api/healthz/ui failed after ")

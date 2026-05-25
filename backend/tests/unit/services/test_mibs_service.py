@@ -436,7 +436,7 @@ END
     assert loaded_by_name["CANONICAL-UPLOAD-MIB"]["relative_path"] == "vendor/CANONICAL-UPLOAD-MIB.txt"
 
 
-def test_status_only_reports_uploaded_compile_failures(isolated_db):
+def test_status_classifies_parse_failures_as_invalid(isolated_db):
     from app.services import mibs_service
     from app.services.bundles import BundleService
     from app.services.state_store import StateStore
@@ -469,9 +469,75 @@ END
     status = mibs_service.get_status(settings=settings, state=state, bundle_service=bundle_service)
     assert status["loaded"] == 0
     assert status["failed"] == 1
-    assert status["errors"][0]["name"] == "BROKEN-MIB"
-    assert status["errors"][0]["file"] == "common/BROKEN-MIB.mib"
-    assert status["errors"][0]["deletable"] is True
+    assert status["errors"] == status["failed_modules"]
+    assert status["failed_modules"][0]["name"] == "BROKEN-MIB"
+    assert status["failed_modules"][0]["file"] == "common/BROKEN-MIB.mib"
+    assert status["failed_modules"][0]["deletable"] is True
+    assert status["failed_modules"][0]["status"] == "invalid"
+    inventory_by_file = {row["file"]: row for row in status["source_inventory"]}
+    assert inventory_by_file["common/BROKEN-MIB.mib"]["status"] == "invalid"
+
+
+def test_status_uses_compile_run_source_path_for_failed_duplicates(isolated_db):
+    from app.services import mibs_service
+    from app.services.bundles import BundleService
+    from app.services.state_store import StateStore
+
+    settings = isolated_db["settings"]
+    session_factory = isolated_db["session_factory"]
+    state = StateStore(session_factory)
+    bundle_service = BundleService(settings)
+
+    result = mibs_service.upload(
+        [
+            (
+                "BROKEN-DUP-MIB.mib",
+                b"""
+BROKEN-DUP-MIB DEFINITIONS ::= BEGIN
+
+brokenNode OBJECT IDENTIFIER ::= { 1 3 6 1 4 1 99999
+
+END
+""",
+            )
+        ],
+        source_group="vendor",
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+
+    assert result["results"][0]["status"] == "failed"
+
+    higher_precedence_copy = settings.data_dir / "mibs" / "common" / "BROKEN-DUP-MIB.mib"
+    higher_precedence_copy.parent.mkdir(parents=True, exist_ok=True)
+    higher_precedence_copy.write_text(
+        """
+BROKEN-DUP-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    enterprises FROM SNMPv2-SMI;
+
+brokenDupNode OBJECT IDENTIFIER ::= { enterprises 99999 }
+
+END
+""".strip()
+        + "\n"
+    )
+    mibs_service._invalidate_source_cache()
+
+    status = mibs_service.get_status(
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+
+    assert status["failed"] == 1
+    inventory_by_file = {row["file"]: row for row in status["source_inventory"]}
+    assert inventory_by_file["vendor/BROKEN-DUP-MIB.mib"]["status"] == "invalid"
+    assert inventory_by_file["vendor/BROKEN-DUP-MIB.mib"]["file"] == "vendor/BROKEN-DUP-MIB.mib"
+    assert inventory_by_file["common/BROKEN-DUP-MIB.mib"]["status"] == "pending"
+    assert status["failed_modules"] == [inventory_by_file["vendor/BROKEN-DUP-MIB.mib"]]
 
 
 def test_status_reports_shadowed_duplicate_sources(isolated_db):
@@ -524,14 +590,78 @@ END
         bundle_service=bundle_service,
     )
 
-    errors_by_file = {row["file"]: row for row in status["errors"]}
     assert status["loaded"] >= 1
-    assert "juniper/JUNIPER-MAG-MIB.mib" in errors_by_file
-    assert errors_by_file["juniper/JUNIPER-MAG-MIB.mib"]["status"] == "shadowed"
+    assert status["failed"] == 0
+    assert status["errors"] == []
+    assert status["failed_modules"] == []
+    inventory_by_file = {row["file"]: row for row in status["source_inventory"]}
+    assert inventory_by_file["common/JUNIPER-MAG-MIB.mib"]["status"] == "active"
+    assert inventory_by_file["juniper/JUNIPER-MAG-MIB.mib"]["status"] == "shadowed"
     assert (
-        errors_by_file["juniper/JUNIPER-MAG-MIB.mib"]["active_relative_path"]
+        inventory_by_file["juniper/JUNIPER-MAG-MIB.mib"]["active_relative_path"]
         == "common/JUNIPER-MAG-MIB.mib"
     )
+    assert inventory_by_file["juniper/JUNIPER-MAG-MIB.mib"]["objects"] >= 1
+
+
+def test_export_catalog_scopes_shadowed_duplicate_membership_by_source_group(isolated_db):
+    from app.services import mibs_service
+    from app.services.bundles import BundleService
+    from app.services.state_store import StateStore
+
+    settings = isolated_db["settings"]
+    session_factory = isolated_db["session_factory"]
+    state = StateStore(session_factory)
+    bundle_service = BundleService(settings)
+
+    result = mibs_service.upload(
+        [
+            (
+                "JUNIPER-MAG-MIB.mib",
+                b"""
+JUNIPER-MAG-MIB DEFINITIONS ::= BEGIN
+
+IMPORTS
+    enterprises FROM SNMPv2-SMI;
+
+juniperMagNode OBJECT IDENTIFIER ::= { enterprises 99999 }
+
+END
+""",
+            )
+        ],
+        source_group="common",
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+
+    assert result["results"][0]["status"] == "loaded"
+
+    shadowed_path = settings.data_dir / "mibs" / "juniper" / "JUNIPER-MAG-MIB.mib"
+    shadowed_path.parent.mkdir(parents=True, exist_ok=True)
+    shadowed_path.write_text(
+        "JUNIPER-MAG-MIB DEFINITIONS ::= BEGIN\n"
+        "IMPORTS enterprises FROM SNMPv2-SMI;\n"
+        "juniperMagShadowedNode OBJECT IDENTIFIER ::= { enterprises 99998 }\n"
+        "END\n"
+    )
+    mibs_service._invalidate_source_cache()
+
+    catalog = mibs_service.export_catalog(
+        source_groups=["juniper"],
+        export_type="catalog",
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+
+    assert catalog["filters"]["requested_source_groups"] == ["juniper"]
+    assert catalog["summary"]["module_count"] == 1
+    assert {module["module_name"] for module in catalog["modules"]} == {"JUNIPER-MAG-MIB"}
+    assert catalog["modules"][0]["source_group"] == "juniper"
+    assert catalog["modules"][0]["source_relative_path"] == "juniper/JUNIPER-MAG-MIB.mib"
+    assert all(item["source_group"] == "juniper" for item in catalog["objects"])
 
 
 def test_delete_uploaded_mib_supports_grouped_relative_paths(isolated_db):
@@ -748,6 +878,54 @@ def test_export_catalog_filters_and_export_types_cover_live_bundle_exports(isola
     assert modules_only["notifications"] == []
     assert modules_only["summary"]["module_count"] == 1
 
+    class _ScopedSourceService:
+        def normalize_source_group(self, source_group):
+            return str(source_group or "").strip()
+
+        def uploaded_source_inventory(self):
+            return []
+
+        def source_path_for_module(self, module_name):
+            del module_name
+            return None
+
+        def module_source_kind(self, source_path):
+            return "uploaded" if "juniper" in source_path.as_posix() else "bundled"
+
+        def source_group_for_path(self, source_path, *, source_kind):
+            del source_kind
+            return "juniper" if "juniper" in source_path.as_posix() else "bundled"
+
+        def source_relative_path(self, source_path, *, source_kind):
+            del source_kind
+            return source_path.name
+
+    bundle_service.get_effective_bundle_summary = lambda: {
+        "label": "Lab Bundle",
+        "bundle_key": "lab-bundle",
+        "modules": [
+            {"module_name": "IF-MIB", "source_path": "/virtual/juniper/IF-MIB.mib"},
+            {"module_name": "SNMPv2-MIB", "source_path": "/virtual/bundled/SNMPv2-MIB.mib"},
+        ],
+    }
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(mibs_service, "_make_source_service", lambda *args, **kwargs: _ScopedSourceService())
+    try:
+        scoped = mibs_service.export_catalog(
+            source_groups=["juniper"],
+            export_type="catalog",
+            settings=settings,
+            state=state,
+            bundle_service=bundle_service,
+        )
+    finally:
+        monkeypatch.undo()
+
+    assert scoped["filters"]["requested_source_groups"] == ["juniper"]
+    assert scoped["metadata"]["bundle_label"] == "Lab Bundle"
+    assert {module["module_name"] for module in scoped["modules"]} == {"IF-MIB"}
+    assert all(item["source_group"] == "juniper" for item in scoped["objects"])
+
     summary_only = mibs_service.export_catalog(
         modules=["IF-MIB"],
         export_type="summary",
@@ -777,7 +955,7 @@ def test_export_catalog_file_supports_json_and_csv_formats(isolated_db):
         state=state,
         bundle_service=bundle_service,
     )
-    assert json_file["filename"] == "notifications.json"
+    assert json_file["filename"] == "notification-if-mib-linkdown.json"
     assert json_file["media_type"] == "application/json"
     json_payload = json.loads(json_file["content"].decode("utf-8"))
     assert json_payload["notifications"][0]["full_name"] == "IF-MIB::linkDown"
@@ -790,7 +968,7 @@ def test_export_catalog_file_supports_json_and_csv_formats(isolated_db):
         state=state,
         bundle_service=bundle_service,
     )
-    assert csv_notifications["filename"] == "notifications.csv"
+    assert csv_notifications["filename"] == "notification-if-mib-linkdown.csv"
     assert csv_notifications["media_type"] == "text/csv"
     csv_notifications_text = csv_notifications["content"].decode("utf-8")
     assert csv_notifications_text.splitlines()[0] == "module,name,oid,description"
@@ -804,7 +982,7 @@ def test_export_catalog_file_supports_json_and_csv_formats(isolated_db):
         state=state,
         bundle_service=bundle_service,
     )
-    assert csv_objects["filename"] == "objects.csv"
+    assert csv_objects["filename"] == "objects-if-mib.csv"
     assert csv_objects["content"].decode("utf-8").splitlines()[0] == "module,name,oid,type"
 
     with pytest.raises(MibsError, match="Unsupported catalog export format"):

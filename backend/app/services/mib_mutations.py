@@ -9,6 +9,48 @@ from sqlalchemy import select
 from app.models import BundleSet
 from app.services.bundles import BundleCompileRequest, BundleServiceError
 
+_LOG_PREVIEW_LIMIT = 12
+
+
+def _normalized_names(values: list[Any] | None) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for value in values or []:
+        normalized = str(value or "").strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(normalized)
+    return ordered
+
+
+def _preview_names(values: list[Any] | None, *, limit: int = _LOG_PREVIEW_LIMIT) -> str:
+    names = _normalized_names(values)
+    if not names:
+        return ""
+    if len(names) <= limit:
+        return ", ".join(names)
+    return f"{', '.join(names[:limit])}, +{len(names) - limit} more"
+
+
+def _result_status_counts(results: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {"loaded": 0, "skipped": 0, "failed": 0, "error": 0}
+    for row in results or []:
+        status = str(row.get("status") or "").strip().lower()
+        if status in counts:
+            counts[status] += 1
+    return counts
+
+
+def _result_mib_names(results: list[dict[str, Any]], *, statuses: set[str]) -> list[str]:
+    return _normalized_names(
+        [
+            row.get("mib_name") or row.get("filename")
+            for row in results or []
+            if str(row.get("status") or "").strip().lower() in statuses
+        ]
+    )
+
 
 class ShellMibMutationService:
     def __init__(
@@ -117,6 +159,7 @@ class ShellMibMutationService:
             compile_targets=compile_targets,
         )
         compile_mode_label = "partial" if str(compile_mode).strip().lower() == "partial" else "full"
+        received_file_count = len(uploaded)
         saved_files: list[str] = []
         target_group = self.normalize_source_group(source_group)
         target_dir = self.upload_dir() / Path(target_group)
@@ -131,14 +174,22 @@ class ShellMibMutationService:
             saved_files.append(target_relative_path)
         self.reset_source_caches()
         mib_names = self.compile_target_mib_names(selected_targets)
+        self.emit_operation_log(
+            (
+                f"Uploading MIB batch: source_group={target_group} mode={compile_mode_label} "
+                f"received_files={received_file_count} saved_files={len(saved_files)} "
+                f"selected_mibs={len(selected_targets)} remote_fetch={bool(remote_policy['enabled'])}"
+            ),
+        )
+        self.emit_operation_log(
+            (
+                f"Upload MIB batch detail: source_group={target_group} saved_files={saved_files} "
+                f"selected_targets={selected_targets} compile_targets={mib_names}"
+            ),
+            level="DEBUG",
+        )
+        compile_error: str | None = None
         try:
-            self.emit_operation_log(
-                (
-                    f"Compiling uploaded MIBs: mode={compile_mode_label} files={saved_files} "
-                    f"selected_targets={selected_targets} compile_targets={mib_names} "
-                    f"remote_fetch={remote_policy['enabled']}"
-                ),
-            )
             compile_result = self.bundle_service.compile_bundle(
                 BundleCompileRequest(
                     mib_names=mib_names,
@@ -164,21 +215,58 @@ class ShellMibMutationService:
                 resolved=compile_result.get("remote_modules") or [],
             )
         except BundleServiceError as exc:
-            self.emit_operation_log(
-                f"Uploaded MIB compile failed for files={saved_files}: {exc}",
-                level="ERROR",
-            )
+            compile_error = str(exc)
             results = self.upload_result_rows(
                 batch=batch,
                 selected_targets=selected_targets,
                 status="failed",
-                error=str(exc),
+                error=compile_error,
             )
             dependency_fetch = self.dependency_fetch_payload(
                 policy=remote_policy,
                 attempted=batch["global_missing_deps"],
-                failed=self.missing_dependencies_from_error(str(exc)) or batch["global_missing_deps"],
+                failed=self.missing_dependencies_from_error(compile_error) or batch["global_missing_deps"],
             )
+
+        status_counts = _result_status_counts(results)
+        failed_mibs = _result_mib_names(results, statuses={"failed", "error"})
+        resolved_remote = _normalized_names(
+            (dependency_fetch.get("resolved") or dependency_fetch.get("downloaded") or [])
+        )
+        unresolved_remote = _normalized_names(dependency_fetch.get("failed") or [])
+        summary = (
+            f"source_group={target_group} mode={compile_mode_label} "
+            f"received_files={received_file_count} saved_files={len(saved_files)} result_rows={len(results)} "
+            f"loaded={status_counts['loaded']} skipped={status_counts['skipped']} "
+            f"failed={status_counts['failed']} errors={status_counts['error']} "
+            f"remote_resolved={len(resolved_remote)} remote_unresolved={len(unresolved_remote)}"
+        )
+        if compile_error is not None:
+            self.emit_operation_log(
+                f"Uploaded MIB compile failed: {summary} error={compile_error}",
+                level="ERROR",
+            )
+        else:
+            self.emit_operation_log(
+                f"Uploaded MIB batch compiled: {summary}",
+            )
+        if failed_mibs:
+            self.emit_operation_log(
+                f"Upload failed MIB modules: {_preview_names(failed_mibs)}",
+                level="ERROR" if compile_error is not None else "WARNING",
+            )
+        if unresolved_remote:
+            self.emit_operation_log(
+                f"Upload unresolved remote dependencies: {_preview_names(unresolved_remote)}",
+                level="WARNING",
+            )
+        self.emit_operation_log(
+            (
+                f"Upload MIB result detail: source_group={target_group} results={results} "
+                f"dependency_fetch={dependency_fetch}"
+            ),
+            level="DEBUG",
+        )
 
         return {
             "results": results,
@@ -207,13 +295,17 @@ class ShellMibMutationService:
             }
         mib_names = self.compile_target_mib_names(uploaded_mib_names)
         remote_policy = self.remote_fetch_policy()
+        self.emit_operation_log(
+            (
+                f"Reloading uploaded MIB bundle: uploaded_mibs={len(uploaded_mib_names)} "
+                f"remote_fetch={bool(remote_policy['enabled'])}"
+            ),
+        )
+        self.emit_operation_log(
+            f"Reload uploaded MIB detail: uploaded_mibs={uploaded_mib_names} compile_targets={mib_names}",
+            level="DEBUG",
+        )
         try:
-            self.emit_operation_log(
-                (
-                    f"Reloading uploaded MIBs: uploaded={uploaded_mib_names} compile_targets={mib_names} "
-                    f"remote_fetch={remote_policy['enabled']}"
-                ),
-            )
             compile_result = self.bundle_service.compile_bundle(
                 BundleCompileRequest(
                     mib_names=mib_names,
@@ -230,19 +322,43 @@ class ShellMibMutationService:
             )
         except BundleServiceError as exc:
             self.emit_operation_log(
-                f"Reloaded MIB compile failed for mib_names={mib_names}: {exc}",
+                (
+                    f"Reloaded uploaded MIB compile failed: uploaded_mibs={len(uploaded_mib_names)} "
+                    f"remote_fetch={bool(remote_policy['enabled'])} error={exc}"
+                ),
                 level="ERROR",
             )
             raise self.error_cls(str(exc)) from exc
         self.increment_counter(self.mib_reload_count_key, 1)
         status = self.load_mib_status()
+        dependency_fetch = self.dependency_fetch_payload(
+            policy=remote_policy,
+            resolved=compile_result.get("remote_modules") or [],
+        )
+        unresolved_remote = _normalized_names(dependency_fetch.get("failed") or [])
+        resolved_remote = _normalized_names(
+            (dependency_fetch.get("resolved") or dependency_fetch.get("downloaded") or [])
+        )
+        self.emit_operation_log(
+            (
+                f"Reloaded uploaded MIB bundle: uploaded_mibs={len(uploaded_mib_names)} "
+                f"loaded={status['loaded']} failed={status['failed']} "
+                f"remote_resolved={len(resolved_remote)} remote_unresolved={len(unresolved_remote)}"
+            ),
+        )
+        if unresolved_remote:
+            self.emit_operation_log(
+                f"Reload unresolved remote dependencies: {_preview_names(unresolved_remote)}",
+                level="WARNING",
+            )
+        self.emit_operation_log(
+            f"Reload uploaded MIB result detail: status={status} dependency_fetch={dependency_fetch}",
+            level="DEBUG",
+        )
         return {
             "loaded": status["loaded"],
             "failed": status["failed"],
-            "dependency_fetch": self.dependency_fetch_payload(
-                policy=remote_policy,
-                resolved=compile_result.get("remote_modules") or [],
-            ),
+            "dependency_fetch": dependency_fetch,
         }
 
     def activate_bundled_starter_bundle(self) -> dict[str, Any] | None:
@@ -366,7 +482,11 @@ class ShellMibMutationService:
         deleted_files = [relative_path for _target, relative_path, _parent, _content in requested]
         before_active_sources = self.active_source_map()
         self.emit_operation_log(
-            f"Deleting uploaded MIB sources: {', '.join(deleted_files)}.",
+            f"Deleting uploaded MIB sources: count={len(deleted_files)}.",
+        )
+        self.emit_operation_log(
+            f"Delete uploaded MIB detail: files={deleted_files}",
+            level="DEBUG",
         )
 
         try:
@@ -378,10 +498,14 @@ class ShellMibMutationService:
             self._restore_deleted_sources(requested)
             self.emit_operation_log(
                 (
-                    f"Bulk delete rollback restored {', '.join(deleted_files)} "
+                    f"Bulk delete rollback restored {len(deleted_files)} uploaded MIB sources "
                     f"after reload failure: {exc}"
                 ),
                 level="ERROR",
+            )
+            self.emit_operation_log(
+                f"Bulk delete rollback detail: files={deleted_files}",
+                level="DEBUG",
             )
             raise self.error_cls(
                 (

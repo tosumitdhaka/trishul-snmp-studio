@@ -59,19 +59,21 @@
                         <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" id="walk-parse-toggle" checked
                                    onchange="WalkerModule.toggleOptions()">
-                            <label class="form-check-label small" for="walk-parse-toggle">JSON Output</label>
+                            <label class="form-check-label small" for="walk-parse-toggle">Structured Output</label>
                         </div>
                         <div class="form-check form-switch mb-0">
                             <input class="form-check-input" type="checkbox" id="walk-use-mibs" checked>
                             <label class="form-check-label small" for="walk-use-mibs">Resolve OIDs</label>
                         </div>
-                        <div class="form-check form-switch mb-0">
-                            <input class="form-check-input" type="checkbox" id="walk-grouped-json"
-                                   onchange="WalkerModule.toggleOptions()">
-                            <label class="form-check-label small" for="walk-grouped-json">Grouped JSON</label>
+                        <div class="input-group input-group-sm app-max-w-220">
+                            <span class="input-group-text">Layout</span>
+                            <select class="form-select" id="walk-json-layout" onchange="WalkerModule.toggleOptions()">
+                                <option value="flat">Flat JSON</option>
+                                <option value="grouped">Grouped JSON</option>
+                            </select>
                         </div>
                     </div>
-                    <div class="form-text small text-muted">Grouped JSON returns the nested grouped layout and keeps OID resolution on.</div>
+                    <div class="form-text small text-muted">Flat JSON returns one row per OID. Grouped JSON returns grouped metric records and keeps OID resolution on.</div>
                 </div>
 
                 <!-- Progress -->

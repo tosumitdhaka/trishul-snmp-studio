@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.services import traps_service
 from app.services.history import EventHistoryService
-from app.services.realtime import broadcast_stats
+from app.services.realtime import broadcast_stats, broadcast_status
 from app.services.session import SessionService, SessionServiceError
 from app.services.state_store import get_state_store
 from app.services.traps_service import TrapsError
@@ -115,14 +115,16 @@ async def send_trap(
 
 
 @router.post("/traps/resolve-mibs")
-def set_resolve_mibs(
+async def set_resolve_mibs(
     body: TrapResolveMibsBody,
     x_auth_token: str | None = Header(default=None),
 ) -> dict[str, Any]:
     """Update resolve_mibs preference live — no receiver restart needed."""
     _require_auth(x_auth_token)
     from app.services.state_store import _TRAP_RESOLVE_MIBS_KEY
-    get_state_store().set_value(_TRAP_RESOLVE_MIBS_KEY, bool(body.resolve_mibs))
+    settings, state, _rt = _ctx()
+    state.set_value(_TRAP_RESOLVE_MIBS_KEY, bool(body.resolve_mibs))
+    await broadcast_status(settings=settings)
     return {"resolve_mibs": bool(body.resolve_mibs)}
 
 

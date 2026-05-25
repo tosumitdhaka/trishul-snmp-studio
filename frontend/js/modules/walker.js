@@ -2,7 +2,7 @@ window.WalkerModule = {
     lastData: null,
     lastDisplayMode: null,
     lastRawLines: null,
-    lastJsonFormat: 'current',
+    lastJsonFormat: 'flat',
     walkHistory: [],
     MAX_HISTORY: 20,
     filteredData: null,
@@ -37,14 +37,20 @@ window.WalkerModule = {
             if (useMibsToggle) {
                 useMibsToggle.checked = parsed.use_mibs !== false;
             }
-            const groupedJsonToggle = document.getElementById('walk-grouped-json');
-            if (groupedJsonToggle) {
-                groupedJsonToggle.checked = (parsed.json_format || 'current') === 'grouped';
-                this.lastJsonFormat = groupedJsonToggle.checked ? 'grouped' : 'current';
+            const jsonLayoutSelect = document.getElementById('walk-json-layout');
+            if (jsonLayoutSelect) {
+                const jsonLayout = this.normalizeJsonLayout(parsed.json_format || 'flat');
+                jsonLayoutSelect.value = jsonLayout;
+                this.lastJsonFormat = jsonLayout;
             }
             this.toggleOptions();
             this.restoreLastResult();
         }
+    },
+
+    normalizeJsonLayout: function(value) {
+        const raw = String(value || '').trim().toLowerCase();
+        return raw === 'grouped' || raw === 'metrics' ? 'grouped' : 'flat';
     },
 
     // ==================== Recent Targets ====================
@@ -127,7 +133,7 @@ window.WalkerModule = {
             mode: mode,
             count: count,
             use_mibs: useMibs !== false,
-            json_format: jsonFormat || 'current'
+            json_format: this.normalizeJsonLayout(jsonFormat || 'flat')
         };
         
         this.walkHistory.unshift(entry);
@@ -170,10 +176,16 @@ window.WalkerModule = {
             const oidText = String(item.oid || '');
             const oidDisplay = oidText.length > 30 ? oidText.substring(0, 30) + '...' : oidText;
             const resultCount = Number(item.count) || 0;
-            const isParsed = item.mode === 'parsed' || item.mode === 'label';
-            const isGrouped = isParsed && item.json_format === 'grouped';
-            const modeBadgeClass = isGrouped ? 'app-badge is-info' : (isParsed ? 'app-badge is-success' : 'app-badge is-neutral');
-            const modeBadgeLabel = isGrouped ? 'Grouped' : (isParsed ? 'JSON' : 'Raw');
+            const isParsed = item.mode === 'parsed';
+            const isLabelFallback = item.mode === 'label';
+            const jsonLayout = this.normalizeJsonLayout(item.json_format || 'flat');
+            const isGrouped = isParsed && jsonLayout === 'grouped';
+            const modeBadgeClass = isLabelFallback
+                ? 'app-badge is-warning'
+                : (isGrouped ? 'app-badge is-info' : (isParsed ? 'app-badge is-success' : 'app-badge is-neutral'));
+            const modeBadgeLabel = isLabelFallback
+                ? 'Label View'
+                : (isGrouped ? 'Grouped JSON' : (isParsed ? 'Flat JSON' : 'Raw'));
             
             return `
                 <a href="#" class="list-group-item list-group-item-action py-2" 
@@ -223,16 +235,16 @@ window.WalkerModule = {
         document.getElementById('walk-oid').value = item.oid;
         document.getElementById('walk-parse-toggle').checked = item.mode === 'parsed' || item.mode === 'label';
         document.getElementById('walk-use-mibs').checked = item.use_mibs !== false;
-        const groupedJsonToggle = document.getElementById('walk-grouped-json');
-        if (groupedJsonToggle) {
-            groupedJsonToggle.checked = (item.json_format || 'current') === 'grouped';
+        const jsonLayoutSelect = document.getElementById('walk-json-layout');
+        if (jsonLayoutSelect) {
+            jsonLayoutSelect.value = this.normalizeJsonLayout(item.json_format || 'flat');
         }
         this.toggleOptions();
         
         // Restore result
         this.lastData = item.result;
         this.lastDisplayMode = item.mode;
-        this.lastJsonFormat = item.json_format || 'current';
+        this.lastJsonFormat = this.normalizeJsonLayout(item.json_format || 'flat');
         this.restoreLastResult();
         
         TrishulUtils.showNotification('Walk loaded from history', 'info');
@@ -273,15 +285,15 @@ window.WalkerModule = {
     toggleOptions: function() {
         const parseEl = document.getElementById("walk-parse-toggle");
         const mibEl = document.getElementById("walk-use-mibs");
-        const groupedJsonEl = document.getElementById("walk-grouped-json");
+        const jsonLayoutEl = document.getElementById("walk-json-layout");
         const parseEnabled = Boolean(parseEl && parseEl.checked);
-        const groupedJson = Boolean(groupedJsonEl && groupedJsonEl.checked);
+        const jsonLayout = this.normalizeJsonLayout(jsonLayoutEl && jsonLayoutEl.value ? jsonLayoutEl.value : 'flat');
 
-        if (groupedJsonEl) {
-            groupedJsonEl.disabled = !parseEnabled;
+        if (jsonLayoutEl) {
+            jsonLayoutEl.disabled = !parseEnabled;
         }
         if (mibEl) {
-            if (parseEnabled && groupedJson) {
+            if (parseEnabled && jsonLayout === 'grouped') {
                 mibEl.checked = true;
                 mibEl.disabled = true;
             } else {
@@ -312,8 +324,10 @@ window.WalkerModule = {
         const oid = document.getElementById("walk-oid").value.trim();
         const parse = document.getElementById("walk-parse-toggle").checked;
         const use_mibs = document.getElementById("walk-use-mibs").checked;
-        const groupedJson = parse && document.getElementById("walk-grouped-json").checked;
-        const json_format = groupedJson ? "grouped" : "current";
+        const jsonLayoutEl = document.getElementById("walk-json-layout");
+        const json_format = parse
+            ? this.normalizeJsonLayout(jsonLayoutEl && jsonLayoutEl.value ? jsonLayoutEl.value : 'flat')
+            : 'flat';
 
         // Validate OID
         if (!oid) {
@@ -362,7 +376,7 @@ window.WalkerModule = {
             this.lastData = data.data;
             this.lastDisplayMode = data.mode;
             this.lastRawLines = data.rawLines || null;
-            this.lastJsonFormat = data.json_format || json_format;
+            this.lastJsonFormat = this.normalizeJsonLayout(data.json_format || json_format);
             this.filteredData = null;
             
             countBadge.textContent = `${data.count} items`;
@@ -374,7 +388,7 @@ window.WalkerModule = {
                 mode: data.mode,
                 rawLines: data.rawLines,
                 use_mibs: use_mibs,
-                json_format: data.json_format || json_format
+                json_format: this.normalizeJsonLayout(data.json_format || json_format)
             }));
             
             if (data.mode === 'parsed') {
@@ -387,7 +401,16 @@ window.WalkerModule = {
                 }
             }
 
-            this.saveWalkHistory(target, port, oid, data.data, data.mode, data.count, use_mibs, data.json_format || json_format);
+            this.saveWalkHistory(
+                target,
+                port,
+                oid,
+                data.data,
+                data.mode,
+                data.count,
+                use_mibs,
+                this.normalizeJsonLayout(data.json_format || json_format),
+            );
             TrishulUtils.showNotification(`Walk completed: ${data.count} items`, 'success');
 
         } catch (e) {
@@ -399,7 +422,7 @@ window.WalkerModule = {
             this.lastData = null;
             this.lastDisplayMode = null;
             this.lastRawLines = null;
-            this.lastJsonFormat = 'current';
+            this.lastJsonFormat = 'flat';
             TrishulUtils.showNotification(e.message, 'error');
         } finally {
             btn.innerHTML = originalText;
@@ -439,7 +462,7 @@ window.WalkerModule = {
         this.lastData = null;
         this.lastDisplayMode = null;
         this.lastRawLines = null;
-        this.lastJsonFormat = 'current';
+        this.lastJsonFormat = 'flat';
         this.filteredData = null;
 
         sessionStorage.removeItem('walkerLastResult');

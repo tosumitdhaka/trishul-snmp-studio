@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Trishul SNMP Suite `2.0.0` is a bundle-first SNMP lab and operations platform. The
+Trishul SNMP Suite `2.0.1` is a bundle-first SNMP lab and operations platform. The
 runtime is centered on:
 
 - one FastAPI application
@@ -20,7 +20,7 @@ The shipped runtime provides:
 - the live operator socket at `/api/ws`
 
 There is no Nginx layer and no external WebSocket bridge or broker in the
-`2.0.0` path. FastAPI serves both the built UI and the live `/api/ws` socket
+current release path. FastAPI serves both the built UI and the live `/api/ws` socket
 directly.
 
 ## Request Flow
@@ -101,7 +101,7 @@ Key services:
 | `bundles.py` | MIB bundle compile, activate, rollback via `trishul-smi` |
 | `mib_sources.py` | Upload directory scanning, source group precedence, shadowing detection, remote source caching |
 | `mib_mutations.py` | MIB upload, partial compile, dependency fetch, delete with rollback |
-| `mibs_service.py` | Orchestrates mib_sources + mib_mutations + bundles for route handlers |
+| `mibs_service.py` | Orchestrates mib_sources + mib_mutations + bundles for route handlers and source-group-aware status or export views |
 | `browser_service.py` | OID resolve, module tree, OID tree, search via `MibBundle` |
 | `traps_service.py` | Trap listener lifecycle, send, event formatting, history reads |
 | `simulator_service.py` | Simulator lifecycle, custom data, logs |
@@ -157,12 +157,15 @@ Important runtime paths:
 - `bundles/cache/tsmi/`
 - `mibs/`
 - `configs/custom_data.json`
-- `logs/`
 - `configs/`
+
+Container deployments emit logs to `stdout`/`stderr` and rely on Docker log
+rotation. `backend/data/logs/backend.log` is only used when file logging is
+explicitly enabled.
 
 ## Database Schema
 
-The `2.0.0` SQLite schema covers:
+The current SQLite schema covers:
 
 - `app_settings` — operator app settings key-value store
 - `auth_sessions` — durable session tokens

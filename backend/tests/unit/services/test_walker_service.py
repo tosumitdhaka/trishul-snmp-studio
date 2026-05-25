@@ -176,7 +176,7 @@ def test_execute_covers_raw_parsed_grouped_and_label_modes(isolated_db, monkeypa
         )
     )
     assert parsed_oid["mode"] == "parsed"
-    assert parsed_oid["json_format"] == "oid"
+    assert parsed_oid["json_format"] == "flat"
     assert parsed_oid["data"][0]["oid"] == "1.3.6.1.2.1.1.3.0"
     assert "symbolic" not in parsed_oid["data"][0]
 

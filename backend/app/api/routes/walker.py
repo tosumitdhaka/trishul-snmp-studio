@@ -20,7 +20,7 @@ class WalkBody(BaseModel):
     oid: str = Field(..., min_length=1)
     parse: bool = True
     use_mibs: bool = True
-    json_format: str = Field("current", min_length=1)
+    json_format: str = Field("flat", min_length=1)
 
 
 def _require_auth(token: str | None) -> None:

@@ -1,6 +1,6 @@
 # Installation Guide
 
-This guide covers the supported `2.0.0` installation paths for Trishul SNMP
+This guide covers the supported `2.0.1` installation paths for Trishul SNMP
 Suite.
 
 ## What Gets Installed
@@ -14,13 +14,15 @@ The runtime is one container that serves:
 - OpenAPI docs under `/docs`
 
 Persistent state is stored in the Docker volume `trishul-snmp-suite-data`.
+Container logs are emitted to `stdout`/`stderr` and should be read with
+`./install-trishul-snmp-suite.sh logs` or `docker logs trishul-snmp-suite`.
 
 ## Prerequisites
 
 - Docker
 - Docker Compose v2 if you want to use `docker compose`
 - free ports for:
-  - `8080/tcp` app access by default
+  - `8980/tcp` app access by default
   - `1061/udp` local responder testing by convention
   - `1162/udp` local notification-listener testing by convention
 
@@ -42,8 +44,8 @@ What it does:
 
 After startup:
 
-- app UI: `http://localhost:8080`
-- API docs: `http://localhost:8080/docs`
+- app UI: `http://localhost:8980`
+- API docs: `http://localhost:8980/docs`
 - default login: `admin` / `admin123`
 
 The current installer also accepts explicit platform and image overrides:
@@ -58,12 +60,18 @@ Notes:
 
 - `--platform` tells Docker which manifest to pull, build, or run for the selected image
 - `--image` overrides the published image reference or the local build tag
+- if `APP_PORT` or `BACKEND_PORT` are omitted on restart, the installer reuses the currently deployed host ports before falling back to `.env`
 
 Environment variable equivalents are also supported:
 
 - `TRISHUL_IMAGE`
 - `DOCKER_PLATFORM`
 - `TRISHUL_DOCKER_PLATFORM`
+
+If you rerun the installer without explicit `APP_PORT` or `BACKEND_PORT`
+overrides, it keeps the currently deployed host mapping. Set
+`BACKEND_PORT=none` on the next restart if you want to remove the compatibility
+alias.
 
 ## Build And Run From This Checkout
 
@@ -93,31 +101,46 @@ docker compose logs -f app
 docker compose down
 ```
 
-For `2.0.0` release validation, prefer the installer over Compose.
+For `2.0.1` release validation, prefer the installer over Compose.
+
+## Logs
+
+Container deployments default to `stdout`/`stderr` logging with Docker-managed
+rotation.
+
+Useful commands:
+
+```bash
+./install-trishul-snmp-suite.sh logs
+docker logs -f trishul-snmp-suite
+```
+
+If you explicitly set `LOG_DESTINATION=stdout+file`, the backend also writes
+`/app/backend/data/logs/backend.log`.
 
 ## Custom Ports
 
 Primary app port:
 
 ```bash
-APP_PORT=8980 ./install-trishul-snmp-suite.sh up
+APP_PORT=9080 ./install-trishul-snmp-suite.sh up
 ```
 
 Custom SNMP test ports:
 
 ```bash
-APP_PORT=8980 SNMP_PORT=2161 TRAP_PORT=2162 ./install-trishul-snmp-suite.sh up
+APP_PORT=9080 SNMP_PORT=2161 TRAP_PORT=2162 ./install-trishul-snmp-suite.sh up
 ```
 
 Compatibility access:
 
 ```bash
-FRONTEND_PORT=8980 BACKEND_PORT=8900 ./install-trishul-snmp-suite.sh up-local
+APP_PORT=9080 BACKEND_PORT=9000 ./install-trishul-snmp-suite.sh up-local
 ```
 
 In that mode:
 
-- `FRONTEND_PORT` acts as the main app URL
+- `APP_PORT` acts as the main app URL
 - `BACKEND_PORT` exposes the same merged app on a second host port
 
 ## Legacy `1.4.1` Runtime
@@ -126,7 +149,7 @@ If you need the pinned merged runtime from the `1.4.1` line, use the legacy
 installer:
 
 This section is intentional compatibility guidance. It is not the recommended
-`2.0.0` runtime path.
+`2.0.1` runtime path.
 
 ```bash
 ./install-trishul-snmp-suite-v1.4.1.sh up
@@ -137,7 +160,7 @@ That installer intentionally keeps the old runtime names:
 - container: `trishul-snmp`
 - volume: `trishul-snmp-data`
 
-Its default ports are shifted so it can run alongside the `2.0.0` installer on
+Its default ports are shifted so it can run alongside the `2.0.1` installer on
 the same host:
 
 - app UI: `http://localhost:8081`
@@ -150,7 +173,7 @@ Useful legacy examples:
 ./install-trishul-snmp-suite-v1.4.1.sh up-cached
 ./install-trishul-snmp-suite-v1.4.1.sh up --platform linux/arm64
 ./install-trishul-snmp-suite-v1.4.1.sh up-cached --image ghcr.io/tosumitdhaka/trishul-snmp-suite:1.4.1
-APP_PORT=8980 ./install-trishul-snmp-suite-v1.4.1.sh up-cached
+APP_PORT=9081 ./install-trishul-snmp-suite-v1.4.1.sh up-cached
 ```
 
 Notes:
@@ -180,7 +203,9 @@ Important paths include:
 - `bundles/cache/tsmi/`
 - `mibs/`
 - `configs/custom_data.json`
-- `logs/`
+
+`logs/backend.log` exists only when file logging is explicitly enabled, such as
+non-container runs or `LOG_DESTINATION=stdout+file`.
 
 ## Backup And Restore
 
@@ -201,10 +226,10 @@ Restore stops the running container first.
 ## Upgrade From 1.x
 
 If you are coming from the old split or early merged runtime, read
-[Migration To Trishul SNMP Suite 2.0.0](migration_to_trishul_snmp_suite.md)
+[Migration Guide](migration_to_trishul_snmp_suite.md)
 before relying on old state.
 
-The installer can preserve or copy old Docker volumes forward, but the `2.0.0`
-runtime uses a new SQLite-plus-bundles model and does not automatically convert
-every old file-based workflow into current SQLite state and compiled bundle
-artifacts.
+The installer can preserve or copy old Docker volumes forward, but the `2.0.1`
+runtime keeps the SQLite-plus-bundles model introduced in `2.0.0` and does not
+automatically convert every old file-based workflow into current SQLite state
+and compiled bundle artifacts.

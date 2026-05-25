@@ -4,6 +4,7 @@ window.MibsModule = {
     failedMibsModal: null,
     trapDetailsModal: null,
     allMibs: [],
+    sourceInventory: [],
     allTraps: [],
     currentStatus: null,
     validationState: null,
@@ -155,7 +156,14 @@ window.MibsModule = {
         if (!data || typeof data !== 'object') return;
 
         this.currentStatus = data;
-        this.allMibs = Array.isArray(data.mibs) ? data.mibs : [];
+        const activeModules = Array.isArray(data.active_modules)
+            ? data.active_modules
+            : (Array.isArray(data.mibs) ? data.mibs : []);
+        const failedModules = Array.isArray(data.failed_modules)
+            ? data.failed_modules
+            : (Array.isArray(data.errors) ? data.errors : []);
+        this.allMibs = activeModules;
+        this.sourceInventory = Array.isArray(data.source_inventory) ? data.source_inventory : [];
         this.reconcileMibSelection();
 
         const loadedEl = document.getElementById('mib-count-loaded');
@@ -170,12 +178,12 @@ window.MibsModule = {
 
         const failedSummaryBtn = document.getElementById('mib-failed-summary-btn');
         if (failedSummaryBtn) {
-            failedSummaryBtn.disabled = !(Array.isArray(data.errors) && data.errors.length > 0);
+            failedSummaryBtn.disabled = failedModules.length === 0;
         }
 
         this.populateSourceGroupOptions(data.source_groups || []);
-        this.populateMibFilterSourceGroupOptions(data.source_groups || [], this.allMibs);
-        this.populateExportSourceGroupOptions(data.source_groups || [], data.mibs || []);
+        this.populateMibFilterSourceGroupOptions(data.source_groups || [], this.allMibs, this.sourceInventory);
+        this.populateExportSourceGroupOptions(data.source_groups || [], this.allMibs, this.sourceInventory);
 
         const trapCountEl = document.getElementById('mib-count-traps');
         if (trapCountEl) {
@@ -184,7 +192,7 @@ window.MibsModule = {
         }
 
         this.renderMibList();
-        this.renderFailedMibs(data.errors || []);
+        this.renderFailedMibs(failedModules);
     },
 
     loadStatus: async function() {
@@ -227,15 +235,18 @@ window.MibsModule = {
         const list = document.getElementById('mib-list');
         if (!list) return;
         const esc = TrishulUtils.escapeHtml;
-        const mibs = this.getFilteredMibs();
         const filters = this.getMibFilterState();
+        const scopedMibs = this.getScopedMibs(filters.sourceGroup);
+        const mibs = this.getFilteredMibs();
         const hasFilter = Boolean(filters.query || filters.sourceGroup);
 
-        if (this.allMibs.length === 0) {
+        if (scopedMibs.length === 0 && !filters.query) {
             list.innerHTML = this.buildListPlaceholder({
-                icon: 'fa-inbox',
-                title: 'No MIB sources',
-                copy: 'Upload MIB files or enable remote dependency fetch before building a bundle.',
+                icon: hasFilter ? 'fa-filter' : 'fa-inbox',
+                title: hasFilter ? 'No matching MIB sources' : 'No MIB sources',
+                copy: hasFilter
+                    ? 'Clear the current filter or choose a different source group.'
+                    : 'Upload MIB files or enable remote dependency fetch before building a bundle.',
             });
             this.updateMibSelectionState();
             return;
@@ -274,6 +285,7 @@ window.MibsModule = {
                             <i class="fas fa-book app-header-icon is-success"></i>
                             <strong class="mib-item-title">${esc(mib.name)}</strong>
                             ${this.renderSourceBadge(mib)}
+                            ${this.renderInventoryStatusBadge(mib)}
                             ${mib.source_group && !['bundled', 'auto-fetched'].includes(String(mib.source_group).toLowerCase()) ? `<span class="badge app-badge is-light">${esc(mib.source_group)}</span>` : ''}
                         </div>
                         <div class="small text-muted mib-item-meta">
@@ -290,6 +302,16 @@ window.MibsModule = {
                         ${mib.relative_path ? `
                             <div class="small text-muted mib-item-detail app-truncate-line" title="${esc(mib.relative_path)}">
                                 Path: ${esc(mib.relative_path)}
+                            </div>
+                        ` : ''}
+                        ${mib.active_relative_path ? `
+                            <div class="small text-muted mib-item-detail app-truncate-line" title="${esc(mib.active_relative_path)}">
+                                Active source: ${esc(mib.active_relative_path)}
+                            </div>
+                        ` : ''}
+                        ${mib.error && String(mib.status || '').toLowerCase() !== 'active' ? `
+                            <div class="small text-muted mib-item-detail app-truncate-line" title="${esc(mib.error)}">
+                                State: ${esc(mib.error)}
                             </div>
                         ` : ''}
                     </div>
@@ -320,8 +342,19 @@ window.MibsModule = {
     },
 
     reconcileMibSelection: function() {
-        const available = new Set((this.allMibs || []).map(mib => this.mibPath(mib)).filter(Boolean));
+        const available = new Set(
+            [...(this.allMibs || []), ...(this.sourceInventory || [])]
+                .map(mib => this.mibPath(mib))
+                .filter(Boolean)
+        );
         this.selectedMibPaths = new Set(Array.from(this.selectedMibPaths).filter(path => available.has(path)));
+    },
+
+    getFailedMibs: function() {
+        if (Array.isArray(this.currentStatus?.failed_modules)) {
+            return this.currentStatus.failed_modules;
+        }
+        return Array.isArray(this.currentStatus?.errors) ? this.currentStatus.errors : [];
     },
 
     getMibFilterState: function() {
@@ -330,13 +363,29 @@ window.MibsModule = {
         return { sourceGroup, query };
     },
 
+    getScopedMibs: function(sourceGroup) {
+        const normalizedGroup = String(sourceGroup || '').trim().toLowerCase();
+        if (!normalizedGroup) {
+            return Array.isArray(this.allMibs) ? this.allMibs : [];
+        }
+
+        const scopedInventory = (Array.isArray(this.sourceInventory) ? this.sourceInventory : []).filter((mib) => {
+            const group = String(mib && mib.source_group ? mib.source_group : '').trim().toLowerCase();
+            return group === normalizedGroup;
+        });
+        if (scopedInventory.length > 0) {
+            return scopedInventory;
+        }
+
+        return (Array.isArray(this.allMibs) ? this.allMibs : []).filter((mib) => {
+            const group = String(mib && mib.source_group ? mib.source_group : '').trim().toLowerCase();
+            return group === normalizedGroup;
+        });
+    },
+
     getFilteredMibs: function() {
         const filters = this.getMibFilterState();
-        return (this.allMibs || []).filter((mib) => {
-            const sourceGroup = String(mib && mib.source_group ? mib.source_group : '').trim().toLowerCase();
-            if (filters.sourceGroup && sourceGroup !== filters.sourceGroup) {
-                return false;
-            }
+        return this.getScopedMibs(filters.sourceGroup).filter((mib) => {
             if (!filters.query) {
                 return true;
             }
@@ -347,6 +396,9 @@ window.MibsModule = {
                 mib && mib.file,
                 mib && mib.source_group,
                 this.sourceLabel(mib),
+                mib && mib.status,
+                mib && mib.error,
+                mib && mib.active_relative_path,
                 imports,
             ]
                 .filter(Boolean)
@@ -452,6 +504,26 @@ window.MibsModule = {
         return '';
     },
 
+    renderInventoryStatusBadge: function(mib) {
+        const status = String(mib && mib.status ? mib.status : '').toLowerCase();
+        if (status === 'shadowed') {
+            return '<span class="badge app-badge is-neutral ms-2">Shadowed</span>';
+        }
+        if (status === 'pending') {
+            return '<span class="badge app-badge is-warning ms-2">Pending</span>';
+        }
+        if (status === 'missing_deps') {
+            return '<span class="badge app-badge is-warning ms-2">Missing deps</span>';
+        }
+        if (status === 'invalid') {
+            return '<span class="badge app-badge is-danger ms-2">Invalid</span>';
+        }
+        if (status === 'failed') {
+            return '<span class="badge app-badge is-danger ms-2">Failed</span>';
+        }
+        return '';
+    },
+
     renderFailedMibs: function(errors) {
         const list = document.getElementById('failed-mib-list');
         const total = document.getElementById('failed-mib-total-count');
@@ -516,7 +588,7 @@ window.MibsModule = {
     },
 
     openFailedMibsModal: function() {
-        const errors = Array.isArray(this.currentStatus?.errors) ? this.currentStatus.errors : [];
+        const errors = this.getFailedMibs();
         this.renderFailedMibs(errors);
         const deleteAllBtn = document.getElementById('mib-delete-all-failed-btn');
         if (deleteAllBtn) deleteAllBtn.disabled = errors.length === 0 || this.deletingMibPaths.size > 0;
@@ -528,7 +600,7 @@ window.MibsModule = {
     },
 
     deleteAllFailed: async function() {
-        const errors = Array.isArray(this.currentStatus?.errors) ? this.currentStatus.errors : [];
+        const errors = this.getFailedMibs();
         const paths = errors
             .filter(e => e.deletable && e.file && !this.isDeletingMibPath(e.file))
             .map(e => e.file);
@@ -982,23 +1054,40 @@ window.MibsModule = {
             const skipped = data.results.filter(r => r.status === 'skipped').length;
             const failed = data.results.filter(r => r.status === 'failed').length;
             const errors = data.results.filter(r => r.status === 'error').length;
+            const selectedCount = input.files ? input.files.length : data.results.length;
+            const processedCount = data.results.length;
 
             let message = normalizedMode === 'partial'
                 ? `Partial Compile Complete!\n\n✓ Successfully loaded: ${loaded}\n`
                 : `Upload Complete!\n\n✓ Successfully loaded: ${loaded}\n`;
             if (data.source_group) message += `Source group: ${data.source_group}\n`;
+            if (processedCount !== selectedCount) {
+                message += `Files processed: ${processedCount} of ${selectedCount}\n`;
+            }
             if (skipped > 0) message += `➜ Skipped for now: ${skipped}\n`;
             if (failed > 0) message += `⚠ Failed to load: ${failed}\n`;
             if (errors > 0) message += `✗ Upload errors: ${errors}\n`;
             if (data.dependency_fetch && data.dependency_fetch.enabled) {
                 const resolvedDeps = (data.dependency_fetch.resolved || data.dependency_fetch.downloaded || []).length;
-                const failedDeps = (data.dependency_fetch.failed || []).length;
+                const unresolvedDeps = (data.dependency_fetch.failed || [])
+                    .map(name => String(name || '').trim())
+                    .filter(Boolean);
+                const failedDeps = unresolvedDeps.length;
+                const unresolvedPreview = failedDeps > 12
+                    ? `${unresolvedDeps.slice(0, 12).join(', ')}, +${failedDeps - 12} more`
+                    : unresolvedDeps.join(', ');
                 message += `\nRemote dependency fetch: ${resolvedDeps} resolved`;
                 if (data.dependency_fetch.using_default_sources) {
                     message += ' via tsmi defaults';
                 }
-                if (failedDeps > 0) message += `, ${failedDeps} failed`;
+                if (failedDeps > 0) message += `, ${failedDeps} unresolved`;
                 message += '\n';
+                if (failedDeps > 0 && failed === 0 && errors === 0) {
+                    message += 'No MIB modules failed to load; one or more remote dependencies remained unresolved.\n';
+                }
+                if (failedDeps > 0) {
+                    message += `Unresolved dependencies: ${unresolvedPreview}\n`;
+                }
             }
 
             const problemFiles = data.results.filter(r => r.status === 'failed' || r.status === 'error' || r.status === 'skipped');
@@ -1087,7 +1176,7 @@ window.MibsModule = {
 
         normalized.forEach(path => this.deletingMibPaths.add(path));
         this.renderMibList();
-        this.renderFailedMibs(this.currentStatus?.errors || []);
+        this.renderFailedMibs(this.getFailedMibs());
 
         try {
             const res = await fetch('/api/mibs/delete-batch', {
@@ -1130,7 +1219,7 @@ window.MibsModule = {
             console.error('Delete failed:', e);
             normalized.forEach(path => this.deletingMibPaths.delete(path));
             this.renderMibList();
-            this.renderFailedMibs(this.currentStatus?.errors || []);
+            this.renderFailedMibs(this.getFailedMibs());
             alert(`Delete failed: ${e.message}`);
         }
     },
@@ -1152,7 +1241,7 @@ window.MibsModule = {
         }).join('');
     },
 
-    populateMibFilterSourceGroupOptions: function(groups, mibs) {
+    populateMibFilterSourceGroupOptions: function(groups, mibs, sourceInventory) {
         const select = document.getElementById('mib-filter-source-group');
         if (!select) return;
 
@@ -1165,6 +1254,9 @@ window.MibsModule = {
         });
 
         (Array.isArray(mibs) ? mibs : []).forEach(mib => {
+            if (mib && mib.source_group) names.add(String(mib.source_group));
+        });
+        (Array.isArray(sourceInventory) ? sourceInventory : []).forEach(mib => {
             if (mib && mib.source_group) names.add(String(mib.source_group));
         });
 
@@ -1182,7 +1274,7 @@ window.MibsModule = {
         }
     },
 
-    populateExportSourceGroupOptions: function(groups, mibs) {
+    populateExportSourceGroupOptions: function(groups, mibs, sourceInventory) {
         const select = document.getElementById('mib-export-source-group');
         if (!select) return;
 
@@ -1195,6 +1287,9 @@ window.MibsModule = {
         });
 
         (Array.isArray(mibs) ? mibs : []).forEach(mib => {
+            if (mib && mib.source_group) names.add(String(mib.source_group));
+        });
+        (Array.isArray(sourceInventory) ? sourceInventory : []).forEach(mib => {
             if (mib && mib.source_group) names.add(String(mib.source_group));
         });
 
@@ -1234,9 +1329,9 @@ window.MibsModule = {
             const blob = await res.blob();
             const disposition = res.headers.get('Content-Disposition') || '';
             const match = disposition.match(/filename="([^"]+)"/);
-            const filename = match ? match[1] : `trishul-mib-catalog.${payload.format === 'csv' ? 'zip' : 'json'}`;
+            const filename = match ? match[1] : `trishul-mibs.${payload.format === 'csv' ? 'csv' : 'json'}`;
             this.triggerDownload(blob, filename);
-            TrishulUtils.showNotification(`Catalog export ready: ${filename}`, 'success');
+            TrishulUtils.showNotification(`Export ready: ${filename}`, 'success');
         } catch (e) {
             console.error('Catalog export failed:', e);
             TrishulUtils.showNotification(`Catalog export failed: ${e.message}`, 'error', 5000);

@@ -1,6 +1,6 @@
 # Development Setup
 
-This repo targets the `2.0.0` runtime built from:
+This repo targets the `2.0.1` runtime built from:
 
 - `backend/app` — FastAPI application with flat service architecture
 - `frontend/` — static operator shell built into `frontend/dist`
@@ -14,7 +14,7 @@ This repo targets the `2.0.0` runtime built from:
 - Python `3.12` or newer for native backend work
 - Node `20` or newer for frontend builds
 
-Net-SNMP CLI tools are not required. The `2.0.0` runtime uses an in-process
+Net-SNMP CLI tools are not required. The `2.0.1` runtime uses an in-process
 SNMP stack.
 
 ## Recommended Daily Workflow
@@ -104,6 +104,12 @@ To run live tests:
 
 ```bash
 TRISHUL_ENABLE_LIVE_SNMP_RUNTIME=1 .venv/bin/python -m pytest backend/tests/live -v
+```
+
+For release-facing backend changes, also run:
+
+```bash
+.venv/bin/python scripts/check_backend_coverage.py
 ```
 
 ## Compose Path

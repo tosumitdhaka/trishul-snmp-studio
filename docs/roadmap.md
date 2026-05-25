@@ -1,6 +1,6 @@
 # Roadmap
 
-This file tracks the shipped `2.0.0` release line and the first planned
+This file tracks the shipped `2.0.x` release line and the first planned
 `2.1.0` follow-up queue.
 
 The temporary `2.0.0` and `2.1.0` planning workspaces were removed from the
@@ -9,9 +9,10 @@ status and [issue_tracker.md](issue_tracker.md) for slice and backlog tracking.
 
 ## Current Delivery State
 
-`2.0.0` is complete. All implementation slices `S0` through `S13` are `Done`.
+`2.0.1` is the current shipped release. The initial `2.0.0` implementation
+slices `S0` through `S13` remain `Done`.
 
-## Delivered In The 2.0.0 Line
+## Delivered In The 2.0.x Line
 
 ### Platform And Runtime
 
@@ -56,7 +57,7 @@ Initial targets:
 - richer dashboard and settings diagnostics through the current stats, runtime, and settings services
 - API and page refinements on the existing unified `/api/...` surface where they simplify the current UI
 
-## Deferred Beyond 2.0.0
+## Deferred Beyond 2.0.x
 
 These items are intentionally out of the current release cut:
 

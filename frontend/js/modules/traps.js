@@ -7,6 +7,7 @@ window.TrapsModule = {
     receivedTraps: [],
     filteredTraps: [],
     _modalJson: {},          // keyed by modal id — avoids JSON-in-onclick-attr breakage
+    _lastStatus: null,
     _receiverUptime: null,   // uptime_seconds cached from last updateStatusUI call
     _trapPollTimer: null,
     _statusPollTimer: null,
@@ -18,7 +19,8 @@ window.TrapsModule = {
     init: function() {
         this.loadPersistedTraps();
 
-        // Replace 3s setInterval with WS event listeners
+        // WS updates are best-effort; keep the REST refresh loop active so the
+        // receiver table stays live even if a push event is missed.
         this._registerListeners();
 
         // REST seed on first paint
@@ -94,7 +96,6 @@ window.TrapsModule = {
 
         // REST re-seed after WS reconnect
         this._on('trishul:ws:open', function() {
-            self._stopPollingFallback();
             self.checkStatus();
             self.loadTraps();
         });
@@ -107,12 +108,29 @@ window.TrapsModule = {
         const resolveToggleEl = document.getElementById('tr-resolve-toggle');
         if (resolveToggleEl) {
             resolveToggleEl.addEventListener('change', function() {
+                const requestedResolve = resolveToggleEl.checked;
+                const previousResolve = !!(self._lastStatus && self._lastStatus.resolve_mibs);
                 fetch('/api/traps/resolve-mibs', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ resolve_mibs: resolveToggleEl.checked }),
+                    body: JSON.stringify({ resolve_mibs: requestedResolve }),
+                }).then(async function(res) {
+                    const data = await res.json().catch(function() { return {}; });
+                    if (!res.ok) {
+                        throw new Error(data.detail || 'Failed to update OID resolution');
+                    }
+                    self.updateStatusUI(Object.assign({}, self._lastStatus || {}, {
+                        resolve_mibs: !!data.resolve_mibs,
+                    }));
                 }).catch(function(e) {
                     console.error('Failed to update resolve_mibs:', e);
+                    resolveToggleEl.checked = previousResolve;
+                    if (self._lastStatus) {
+                        self.updateStatusUI(Object.assign({}, self._lastStatus, {
+                            resolve_mibs: previousResolve,
+                        }));
+                    }
+                    self.showNotification(`Trap receiver settings update failed: ${e.message}`, 'error');
                 });
             });
         }
@@ -122,9 +140,6 @@ window.TrapsModule = {
         var self = this;
 
         this._stopPollingFallback();
-        if (window.WsClient && typeof window.WsClient.isConnected === 'function' && window.WsClient.isConnected()) {
-            return;
-        }
 
         this._trapPollTimer = window.setInterval(function() {
             if (self._trapPollInFlight) return;
@@ -942,6 +957,7 @@ window.TrapsModule = {
         const resolveToggle = document.getElementById("tr-resolve-toggle");
         const portInput     = document.getElementById("tr-port");
         const communityInput = document.getElementById("tr-community");
+        this._lastStatus = Object.assign({}, status || {});
         
         if (!badge) return;
         
@@ -971,7 +987,9 @@ window.TrapsModule = {
             btnStop.disabled  = false;
         } else {
             TrishulUtils.setStatusBadgeState(badge, 'stopped', 'STOPPED');
-            if (detail) detail.textContent = "Receiver stopped. Configure and start to listen.";
+            if (detail) {
+                detail.textContent = `Receiver stopped · ${status.resolve_mibs ? 'OID resolution on' : 'OID resolution off'}`;
+            }
             // Fix #26: also sync toggle when stopped, using last known resolve_mibs
             // value returned by the backend (resolve_mibs is non-null even when stopped).
             if (resolveToggle && status.resolve_mibs != null) {

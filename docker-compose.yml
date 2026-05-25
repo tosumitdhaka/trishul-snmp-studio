@@ -5,28 +5,35 @@ services:
     env_file:
       - .env
     ports:
-      - "${APP_PORT:-8080}:8000"
+      - "${APP_PORT:-8980}:8000"
       - "${SNMP_PORT:-1061}:${SNMP_PORT:-1061}/udp"
       - "${TRAP_PORT:-1162}:${TRAP_PORT:-1162}/udp"
     volumes:
       - trishul-snmp-suite-data:/app/backend/data
     environment:
       - PYTHONUNBUFFERED=1
+      - TRISHUL_CONTAINER=1
+      - LOG_DESTINATION=${LOG_DESTINATION:-stdout}
       # Application Metadata
       - APP_NAME=${APP_NAME:-Trishul SNMP Suite}
-      - APP_VERSION=${APP_VERSION:-2.0.0}
+      - APP_VERSION=${APP_VERSION:-2.0.1}
       - APP_AUTHOR=${APP_AUTHOR:-Sumit Dhaka}
       - APP_DESCRIPTION=${APP_DESCRIPTION:-Bundle-first SNMP lab and operations shell}
       # Security
       - SESSION_TIMEOUT=${SESSION_TIMEOUT:-3600}
       # CORS
-      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:8000,http://localhost:8900,http://localhost:8980}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:8980,http://localhost:8000,http://localhost:5173}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+        max-file: "${DOCKER_LOG_MAX_FILE:-5}"
     restart: always
 
 volumes:

@@ -1,6 +1,6 @@
 # FAQ
 
-## Does `2.0.0` support SNMPv3?
+## Does `2.0.1` support SNMPv3?
 
 No. The current runtime surface is built around SNMP `v2c`.
 
@@ -8,26 +8,28 @@ No. The current runtime surface is built around SNMP `v2c`.
 
 No for normal operation.
 
-The current `2.0.0` bundle pipeline works fully from local files. Optional
+The current `2.0.1` bundle pipeline works fully from local files. Optional
 remote dependency fetch can be enabled in `Settings` if you want uploads or
 reloads to resolve missing MIB imports from approved remote sources.
 
 ## Where is state stored?
 
-In the `2.0.0` runtime, the main sources of truth are:
+In the `2.0.1` runtime, the main sources of truth are:
 
 - `backend/data/trishul_v2.sqlite3`
 - `backend/data/bundles/sets/`
 - `backend/data/bundles/cache/tsmi/`
-- `backend/data/logs/`
 
 In Docker, the data root is persisted in the `trishul-snmp-suite-data` volume.
+Container logs are read with `docker logs trishul-snmp-suite` and are not
+stored in that volume by default. File logs only exist when
+`LOG_DESTINATION` includes `file`.
 
 ## What are the default ports?
 
 The installer defaults are:
 
-- app UI and docs: `8080/tcp`
+- app UI and docs: `8980/tcp`
 - local responder testing: `1061/udp`
 - local notification-listener testing: `1162/udp`
 
@@ -65,7 +67,7 @@ The installer can preserve and copy old Docker volumes forward, and the current
 release shell intentionally keeps familiar file-backed workflows where possible,
 but you should still validate MIBs, simulator data, and settings after upgrade.
 
-## Which docs are current for 2.0.0?
+## Which docs are current for 2.0.1?
 
 Start with:
 

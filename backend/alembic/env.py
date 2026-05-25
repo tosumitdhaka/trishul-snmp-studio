@@ -22,7 +22,7 @@ database_url = (
     or settings.database_url
 )
 
-if config.config_file_name is not None:
+if config.config_file_name is not None and not config.attributes.get("use_existing_app_logging"):
     fileConfig(config.config_file_name)
 
 config.set_main_option("sqlalchemy.url", database_url)

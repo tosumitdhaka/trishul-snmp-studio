@@ -914,7 +914,11 @@ class ShellMibSourceService:
                 session.commit()
 
         self.emit_operation_log(
-            "Persisted auto-fetched MIB sources: " + ", ".join(sorted(persisted)),
+            f"Persisted auto-fetched MIB sources: count={len(persisted)}",
+        )
+        self.emit_operation_log(
+            "Persisted auto-fetched MIB source detail: " + ", ".join(sorted(persisted)),
+            level="DEBUG",
         )
         return persisted
 

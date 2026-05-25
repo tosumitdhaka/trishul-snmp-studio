@@ -1,15 +1,15 @@
-# Migration To Trishul SNMP Suite 2.0.0
+# Migration To Trishul SNMP Suite 2.0.x
 
 This guide covers migration from the older `1.x` runtime line to the current
-`2.0.0` platform.
+`2.0.1` platform.
 
 This document intentionally references `1.x` and legacy runtime names because
-it is the migration guide. Use the other operator docs for the normal `2.0.0`
+it is the migration guide. Use the other operator docs for the normal `2.0.1`
 steady-state view.
 
 ## What Changed
 
-`2.0.0` changes the backend platform substantially, but the shipped release UI
+`2.0.1` keeps the backend platform introduced in `2.0.0`, but the shipped release UI
 keeps the familiar page-based operator shell.
 
 Main changes:
@@ -83,7 +83,7 @@ Compared with `1.x`:
 
 If you need to roll back during validation:
 
-1. stop the merged `2.0.0` container
+1. stop the merged `2.0.1` container
 2. keep `trishul-snmp-suite-data` intact
 3. use the preserved `trishul-snmp-data` volume as the source of truth for the old runtime
 4. recreate the old containers only if you intentionally return to `1.x`

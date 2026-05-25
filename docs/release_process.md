@@ -85,7 +85,20 @@ candidate:
 8. `/api/meta`, `/api/health`, and `/docs` respond correctly
 9. `/api/ws` accepts an authenticated connection
 
-## 6. Publish Images
+## 6. Tag the Release
+
+Create a version tag on the release commit and push it to trigger the CI release workflow:
+
+```bash
+git tag v<VERSION> <commit-sha>
+git push origin v<VERSION>
+```
+
+- Tag the exact commit that represents the release (the finalize commit), not `HEAD` if `HEAD` has moved past it.
+- Tag in version order (older releases first) so the newest ends up as "Latest" on GitHub.
+- `.github/workflows/release.yml` will create the GitHub release automatically once the tag is pushed.
+
+## 7. Publish Images
 
 Image publishing is automatic. After the release commit is pushed to `main`,
 GitHub Actions runs `.github/workflows/ghcr-publish.yml` and publishes:
@@ -98,7 +111,7 @@ Multi-architecture manifest for `linux/amd64` and `linux/arm64`.
 Before calling the release complete, verify the workflow run succeeded and the
 expected tags are available.
 
-## 7. Migration Checks
+## 8. Migration Checks
 
 Before shipping a public cut:
 
@@ -107,7 +120,7 @@ Before shipping a public cut:
 3. verify old Docker volumes are preserved during migration
 4. verify the migration guide accurately documents what is and is not converted
 
-## 8. Post-Release Checks
+## 9. Post-Release Checks
 
 After the publish completes:
 

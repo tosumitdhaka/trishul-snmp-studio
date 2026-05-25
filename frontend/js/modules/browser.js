@@ -737,6 +737,7 @@ window.BrowserModule = {
                 countBadge.textContent = data.count;
                 
                 setTimeout(() => {
+                    this.autoExpandFilteredModuleRoots();
                     this.restoreExpandedNodes();
                 }, 100);
                 
@@ -807,6 +808,22 @@ window.BrowserModule = {
         } else {
             container.innerHTML = html;
         }
+    },
+
+    shouldAutoExpandFilteredModuleRoots: function() {
+        return this.currentView === 'module'
+            && !this.isSearchActive
+            && Boolean(this.currentModule || this.currentTypeFilter);
+    },
+
+    autoExpandFilteredModuleRoots: function() {
+        if (!this.shouldAutoExpandFilteredModuleRoots()) {
+            return;
+        }
+
+        document.querySelectorAll('#browser-tree-container .tree-module').forEach(node => {
+            this.setNodeExpanded(node, true);
+        });
     },
     
     renderOidTree: function(data, container) {

@@ -6,8 +6,51 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
-DEFAULT_APP_VERSION="$(grep -E '^APP_VERSION=' "$ENV_FILE" 2>/dev/null | head -n1 | cut -d= -f2-)"
-APP_VERSION="${APP_VERSION:-${DEFAULT_APP_VERSION:-2.0.0}}"
+
+read_env_default() {
+    local key="$1"
+    local fallback="$2"
+    local value=""
+
+    if [ -f "$ENV_FILE" ]; then
+        value="$(grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -n1 | cut -d= -f2-)"
+    fi
+
+    if [ -n "$value" ]; then
+        printf '%s\n' "$value"
+    else
+        printf '%s\n' "$fallback"
+    fi
+}
+
+join_by() {
+    local separator="$1"
+    shift
+    local first=1
+    local item
+
+    for item in "$@"; do
+        if [ $first -eq 1 ]; then
+            printf '%s' "$item"
+            first=0
+        else
+            printf '%s%s' "$separator" "$item"
+        fi
+    done
+    printf '\n'
+}
+
+DEFAULT_APP_VERSION="$(read_env_default APP_VERSION 2.0.1)"
+DEFAULT_APP_PORT="$(read_env_default APP_PORT 8980)"
+DEFAULT_FRONTEND_PORT="$(read_env_default FRONTEND_PORT "$DEFAULT_APP_PORT")"
+DEFAULT_BACKEND_PORT="$(read_env_default BACKEND_PORT "")"
+DEFAULT_SNMP_PORT="$(read_env_default SNMP_PORT 1061)"
+DEFAULT_TRAP_PORT="$(read_env_default TRAP_PORT 1162)"
+DEFAULT_LOG_DESTINATION="$(read_env_default LOG_DESTINATION stdout)"
+DEFAULT_DOCKER_LOG_MAX_SIZE="$(read_env_default DOCKER_LOG_MAX_SIZE 10m)"
+DEFAULT_DOCKER_LOG_MAX_FILE="$(read_env_default DOCKER_LOG_MAX_FILE 5)"
+
+APP_VERSION="${APP_VERSION:-${DEFAULT_APP_VERSION}}"
 
 GHCR_USER="tosumitdhaka"
 APP_GHCR_IMAGE="ghcr.io/${GHCR_USER}/trishul-snmp-suite:latest"
@@ -18,10 +61,17 @@ LEGACY_CONTAINER_BACKEND="trishul-snmp-backend"
 LEGACY_CONTAINER_FRONTEND="trishul-snmp-frontend"
 LEGACY_VOLUME_NAME="trishul-snmp-data"
 
-APP_PORT="${APP_PORT:-${FRONTEND_PORT:-8080}}"
-BACKEND_COMPAT_PORT="${BACKEND_PORT:-}"
-SNMP_PORT="${SNMP_PORT:-1061}"
-TRAP_PORT="${TRAP_PORT:-1162}"
+EXPLICIT_APP_PORT="${APP_PORT:-}"
+EXPLICIT_FRONTEND_PORT="${FRONTEND_PORT:-}"
+EXPLICIT_BACKEND_PORT="${BACKEND_PORT:-}"
+
+APP_PORT=""
+BACKEND_COMPAT_PORT=""
+SNMP_PORT="${SNMP_PORT:-${DEFAULT_SNMP_PORT}}"
+TRAP_PORT="${TRAP_PORT:-${DEFAULT_TRAP_PORT}}"
+CONTAINER_LOG_DESTINATION="${LOG_DESTINATION:-${DEFAULT_LOG_DESTINATION}}"
+DOCKER_LOG_MAX_SIZE="${DOCKER_LOG_MAX_SIZE:-${DEFAULT_DOCKER_LOG_MAX_SIZE}}"
+DOCKER_LOG_MAX_FILE="${DOCKER_LOG_MAX_FILE:-${DEFAULT_DOCKER_LOG_MAX_FILE}}"
 IMAGE_SOURCE="${TRISHUL_IMAGE_SOURCE:-ghcr}"
 IMAGE_OVERRIDE="${TRISHUL_IMAGE:-}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-${TRISHUL_DOCKER_PLATFORM:-}}"
@@ -74,6 +124,29 @@ skip_legacy_migration_requested() {
             return 1
             ;;
     esac
+}
+
+default_allowed_origins() {
+    local origins=(
+        "http://localhost:${APP_PORT}"
+        "http://localhost:8000"
+        "http://localhost:5173"
+    )
+
+    if [ -n "$BACKEND_COMPAT_PORT" ] && [ "$BACKEND_COMPAT_PORT" != "$APP_PORT" ]; then
+        origins+=("http://localhost:${BACKEND_COMPAT_PORT}")
+    fi
+
+    join_by "," "${origins[@]}"
+}
+
+resolve_allowed_origins() {
+    if [ -n "${ALLOWED_ORIGINS:-}" ]; then
+        printf '%s\n' "$ALLOWED_ORIGINS"
+        return 0
+    fi
+
+    default_allowed_origins
 }
 
 image_uses_ghcr() {
@@ -196,11 +269,14 @@ show_usage() {
     echo "  --no-migrate        - Skip automatic copy from legacy volume ${LEGACY_VOLUME_NAME}"
     echo ""
     echo "Environment variables:"
-    echo "  APP_PORT                - Canonical app port (default: FRONTEND_PORT or 8080)"
+    echo "  APP_PORT                - Canonical app port (default: current deployed app port, else 8980)"
     echo "  FRONTEND_PORT           - Legacy alias for APP_PORT"
     echo "  BACKEND_PORT            - Optional compatibility port mapped to the same app"
     echo "  SNMP_PORT               - SNMP UDP port (default: 1061)"
     echo "  TRAP_PORT               - Trap receiver UDP port (default: 1162)"
+    echo "  LOG_DESTINATION         - App log destination inside the container (default: stdout)"
+    echo "  DOCKER_LOG_MAX_SIZE     - Docker json-file max-size rotation limit (default: 10m)"
+    echo "  DOCKER_LOG_MAX_FILE     - Docker json-file max-file rotation count (default: 5)"
     echo "  APP_VERSION             - Local image tag override (default: .env APP_VERSION)"
     echo "  GHCR_TOKEN              - GitHub PAT for GHCR if needed"
     echo "  TRISHUL_IMAGE_SOURCE    - ghcr or local (default: ghcr)"
@@ -214,15 +290,131 @@ show_usage() {
     echo "  $0 up --platform linux/arm64"
     echo "  $0 up --image ghcr.io/${GHCR_USER}/trishul-snmp-suite:latest"
     echo "  $0 up-local --image trishul-snmp-suite-local:test-arm --platform linux/arm64"
-    echo "  APP_PORT=8980 $0 up-local"
-    echo "  FRONTEND_PORT=8980 BACKEND_PORT=8900 $0 up-local"
-    echo "  FRONTEND_PORT=8980 BACKEND_PORT=8900 $0 up-local --no-migrate"
+    echo "  APP_PORT=9080 $0 up-local"
+    echo "  APP_PORT=9080 BACKEND_PORT=9000 $0 up-local"
+    echo "  BACKEND_PORT=none $0 restart-local"
+    echo "  FRONTEND_PORT=9080 BACKEND_PORT=9000 $0 up-local --no-migrate"
     echo "  $0 backup"
 }
 
 require_commands() {
     command -v docker >/dev/null 2>&1 || fail "docker is not installed or not in PATH"
     command -v python3 >/dev/null 2>&1 || fail "python3 is not installed or not in PATH"
+}
+
+docker_accessible() {
+    docker ps >/dev/null 2>&1
+}
+
+container_available_for_inspection() {
+    command -v docker >/dev/null 2>&1 \
+        && docker_accessible \
+        && docker inspect "$CONTAINER_NAME" >/dev/null 2>&1
+}
+
+container_label_value() {
+    local label_key="$1"
+    local value=""
+
+    if ! container_available_for_inspection; then
+        return 0
+    fi
+
+    value="$(docker inspect "$CONTAINER_NAME" --format "{{ with index .Config.Labels \"$label_key\" }}{{ . }}{{ end }}" 2>/dev/null || true)"
+    printf '%s\n' "$value"
+}
+
+normalize_optional_port_value() {
+    case "${1:-}" in
+        ""|none|NONE|off|OFF|false|FALSE|disable|DISABLE|disabled|DISABLED|0)
+            printf '\n'
+            ;;
+        *)
+            printf '%s\n' "$1"
+            ;;
+    esac
+}
+
+resolve_running_app_port() {
+    local label_value=""
+    label_value="$(container_label_value "trishul.app_port")"
+    if [ -n "$label_value" ]; then
+        printf '%s\n' "$label_value"
+        return 0
+    fi
+
+    local ports=()
+    mapfile -t ports < <(discover_running_http_ports)
+    if [ ${#ports[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    local port
+    for port in "${ports[@]}"; do
+        if [ "$port" = "$DEFAULT_FRONTEND_PORT" ]; then
+            printf '%s\n' "$port"
+            return 0
+        fi
+    done
+
+    printf '%s\n' "${ports[$((${#ports[@]} - 1))]}"
+}
+
+resolve_running_compat_port() {
+    local primary_port="$1"
+    local label_value=""
+    label_value="$(normalize_optional_port_value "$(container_label_value "trishul.compat_port")")"
+    if [ -n "$label_value" ]; then
+        printf '%s\n' "$label_value"
+        return 0
+    fi
+
+    local ports=()
+    mapfile -t ports < <(discover_running_http_ports)
+    if [ ${#ports[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    local port
+    for port in "${ports[@]}"; do
+        if [ -n "$primary_port" ] && [ "$port" = "$primary_port" ]; then
+            continue
+        fi
+        printf '%s\n' "$port"
+        return 0
+    done
+}
+
+resolve_port_configuration() {
+    local resolved_app_port=""
+    local resolved_compat_port=""
+
+    if [ -n "$EXPLICIT_APP_PORT" ]; then
+        resolved_app_port="$EXPLICIT_APP_PORT"
+    elif [ -n "$EXPLICIT_FRONTEND_PORT" ]; then
+        resolved_app_port="$EXPLICIT_FRONTEND_PORT"
+    else
+        resolved_app_port="$(resolve_running_app_port)"
+        if [ -z "$resolved_app_port" ]; then
+            resolved_app_port="$DEFAULT_FRONTEND_PORT"
+        fi
+    fi
+
+    if [ -n "$EXPLICIT_BACKEND_PORT" ]; then
+        resolved_compat_port="$(normalize_optional_port_value "$EXPLICIT_BACKEND_PORT")"
+    else
+        resolved_compat_port="$(normalize_optional_port_value "$(resolve_running_compat_port "$resolved_app_port")")"
+        if [ -z "$resolved_compat_port" ]; then
+            resolved_compat_port="$(normalize_optional_port_value "$DEFAULT_BACKEND_PORT")"
+        fi
+    fi
+
+    if [ -n "$resolved_compat_port" ] && [ "$resolved_compat_port" = "$resolved_app_port" ]; then
+        resolved_compat_port=""
+    fi
+
+    APP_PORT="$resolved_app_port"
+    BACKEND_COMPAT_PORT="$resolved_compat_port"
 }
 
 check_ghcr_login() {
@@ -380,7 +572,7 @@ wait_for_app() {
         if python3 -c "
 import urllib.request, sys
 try:
-    urllib.request.urlopen('http://localhost:${port}/api/health', timeout=2)
+    urllib.request.urlopen('http://127.0.0.1:${port}/api/health', timeout=2)
     sys.exit(0)
 except Exception:
     sys.exit(1)
@@ -394,6 +586,47 @@ except Exception:
     done
     echo -e " ${RED}timed out${NC}"
     return 1
+}
+
+discover_running_http_ports() {
+    if ! container_available_for_inspection; then
+        return 0
+    fi
+    docker port "$CONTAINER_NAME" 8000/tcp 2>/dev/null | awk -F: '{print $NF}' | awk 'NF' | sort -n | uniq
+}
+
+status_probe_ports() {
+    local ports=()
+    local seen=""
+    local port
+
+    for port in "$APP_PORT" "$BACKEND_COMPAT_PORT"; do
+        if [ -n "$port" ] && [[ ",$seen," != *",$port,"* ]]; then
+            ports+=("$port")
+            seen="${seen},${port}"
+        fi
+    done
+
+    while IFS= read -r port; do
+        if [ -n "$port" ] && [[ ",$seen," != *",$port,"* ]]; then
+            ports+=("$port")
+            seen="${seen},${port}"
+        fi
+    done < <(discover_running_http_ports)
+
+    printf '%s\n' "${ports[@]}"
+}
+
+probe_meta_version_for_port() {
+    local port="$1"
+    python3 -c "
+import urllib.request, json
+try:
+    response = urllib.request.urlopen('http://127.0.0.1:${port}/api/meta', timeout=3)
+    print(json.loads(response.read()).get('version', 'unknown'))
+except Exception:
+    print('unavailable')
+" 2>/dev/null
 }
 
 print_access_info() {
@@ -439,6 +672,8 @@ run_container() {
     echo "   SNMP port:    $SNMP_PORT/udp"
     echo "   Trap port:    $TRAP_PORT/udp"
     echo "   Data volume:  $VOLUME_NAME"
+    echo "   Log mode:     $CONTAINER_LOG_DESTINATION"
+    echo "   Log rotate:   ${DOCKER_LOG_MAX_SIZE} x ${DOCKER_LOG_MAX_FILE}"
     if [ -n "$DOCKER_PLATFORM" ]; then
         echo "   Platform:     $DOCKER_PLATFORM"
     fi
@@ -446,8 +681,16 @@ run_container() {
     docker run -d \
         "${DOCKER_PLATFORM_ARGS[@]}" \
         --name "$CONTAINER_NAME" \
+        --label "trishul.app_port=${APP_PORT}" \
+        --label "trishul.compat_port=${BACKEND_COMPAT_PORT}" \
+        --log-driver json-file \
+        --log-opt "max-size=${DOCKER_LOG_MAX_SIZE}" \
+        --log-opt "max-file=${DOCKER_LOG_MAX_FILE}" \
         "${ENV_ARGS[@]}" \
-        -e ALLOWED_ORIGINS="${ALLOWED_ORIGINS:-http://localhost:${APP_PORT},http://localhost:8000,http://localhost:8900,http://localhost:8980}" \
+        -e PYTHONUNBUFFERED=1 \
+        -e TRISHUL_CONTAINER=1 \
+        -e LOG_DESTINATION="${CONTAINER_LOG_DESTINATION}" \
+        -e ALLOWED_ORIGINS="$(resolve_allowed_origins)" \
         -v "${VOLUME_NAME}:/app/backend/data" \
         --restart unless-stopped \
         "${PORT_ARGS[@]}" \
@@ -478,10 +721,19 @@ show_logs() {
 
 show_status() {
     require_commands
+    local docker_ok=0
+    if docker_accessible; then
+        docker_ok=1
+    fi
+
     echo "Container status:"
-    docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null || true
+    if [ "$docker_ok" -eq 1 ]; then
+        docker ps --filter "name=${CONTAINER_NAME}" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" 2>/dev/null || true
+    else
+        echo "Docker API unavailable (daemon not reachable or permission denied)"
+    fi
     echo ""
-    echo "Configuration:"
+    echo "Requested configuration:"
     echo "   Image source: $IMAGE_SOURCE"
     echo "   Image:        $APP_IMAGE"
     echo "   App port:     $APP_PORT"
@@ -491,25 +743,55 @@ show_status() {
     echo "   SNMP port:    $SNMP_PORT/udp"
     echo "   Trap port:    $TRAP_PORT/udp"
     echo "   Data volume:  $VOLUME_NAME"
+    echo "   Log mode:     $CONTAINER_LOG_DESTINATION"
+    echo "   Log rotate:   ${DOCKER_LOG_MAX_SIZE} x ${DOCKER_LOG_MAX_FILE}"
     echo "   Platform:     ${DOCKER_PLATFORM:-auto}"
-    if volume_exists "$VOLUME_NAME"; then
+    if [ "$docker_ok" -eq 1 ] && volume_exists "$VOLUME_NAME"; then
         local mount_point
         mount_point=$(docker volume inspect "$VOLUME_NAME" --format '{{.Mountpoint}}')
         echo "   Volume path:  $mount_point"
     fi
     echo ""
-    echo "Running image:"
-    docker inspect "$CONTAINER_NAME" --format "   App: {{.Config.Image}}" 2>/dev/null || echo "   App: not running"
-    local version
-    version=$(python3 -c "
-import urllib.request, json
-try:
-    response = urllib.request.urlopen('http://localhost:${APP_PORT}/api/meta', timeout=3)
-    print(json.loads(response.read()).get('version', 'unknown'))
-except Exception:
-    print('unavailable')
-" 2>/dev/null)
-    echo "   App version: ${version}"
+    echo "Running container:"
+    if [ "$docker_ok" -ne 1 ]; then
+        echo "   Docker:       unavailable"
+        echo "   App version:  unavailable"
+        return 0
+    fi
+
+    local running_image
+    running_image=$(docker inspect "$CONTAINER_NAME" --format '{{.Config.Image}}' 2>/dev/null || true)
+    if [ -n "$running_image" ]; then
+        echo "   Image:        $running_image"
+    else
+        echo "   Image:        not running"
+    fi
+
+    local running_http_ports=()
+    mapfile -t running_http_ports < <(discover_running_http_ports)
+    if [ ${#running_http_ports[@]} -gt 0 ]; then
+        local joined_ports
+        joined_ports="$(join_by ', ' "${running_http_ports[@]}")"
+        echo "   Host ports:   ${joined_ports}"
+    fi
+
+    local version="unavailable"
+    local version_port=""
+    local port
+    while IFS= read -r port; do
+        [ -n "$port" ] || continue
+        version=$(probe_meta_version_for_port "$port")
+        if [ "$version" != "unavailable" ]; then
+            version_port="$port"
+            break
+        fi
+    done < <(status_probe_ports)
+
+    if [ -n "$version_port" ]; then
+        echo "   App version:  ${version} (via ${version_port})"
+    else
+        echo "   App version:  ${version}"
+    fi
 }
 
 backup_data() {
@@ -558,6 +840,7 @@ fi
 parse_cli_args "$@"
 DOCKER_PLATFORM="$(normalize_platform "$DOCKER_PLATFORM")"
 validate_command_args
+resolve_port_configuration
 set_image_source "$IMAGE_SOURCE"
 
 case "$COMMAND" in

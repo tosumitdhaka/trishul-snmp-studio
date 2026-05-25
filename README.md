@@ -7,18 +7,22 @@
 [![GHCR](https://img.shields.io/badge/GHCR-Packages-blue?style=for-the-badge&logo=github)](https://github.com/tosumitdhaka?tab=packages&repo_name=trishul-snmp-suite)
 
 Trishul SNMP Suite is a bundle-first SNMP lab and operations shell. The current
-`2.0.0` line moves the runtime to the new FastAPI plus SQLite platform while
+`2.0.1` line keeps the FastAPI plus SQLite platform introduced in `2.0.0` and
+adds the current hotfix cleanup around source inventory, traps, and deployment behavior while
 keeping the familiar page-based operator shell as the release UI.
 
 ![Trishul SNMP Suite Demo](./assets/trishul_snmp_demo.gif)
 
-## 2.0.0 Highlights
+## 2.0.1 Highlights
 
 - one FastAPI application in `backend/app`
 - restored release UI in `frontend/` with `Dashboard`, `Simulator`, `Walk & Parse`, `Traps`, `MIB Browser`, `MIB Manager`, and `Settings`
-- current `/api/...` operator-shell routes backed by the new `2.0.0` services and SQLite state
+- one unified `/api/...` surface with no secondary `/api/v2` runtime
 - SQLite-backed state for settings, sessions, bundles, and notification history
+- source-group-aware MIB status and export flows with a deduplicated active runtime view
 - bundle, catalog, and runtime services powered by `trishul-smi` and `trishul-snmp`
+- installer defaults to `8980` with optional `BACKEND_PORT` compatibility alias
+- container-first logging to `stdout`/`stderr` with Docker rotation and quieter, event-focused `INFO` logs
 - one current installer for the suite image plus one pinned legacy installer for `1.4.1`
 
 ## Quick Start
@@ -37,9 +41,15 @@ Build and run the current checkout with:
 
 Default access:
 
-- app UI: `http://localhost:8080`
-- API docs: `http://localhost:8080/docs`
+- app UI: `http://localhost:8980`
+- API docs: `http://localhost:8980/docs`
 - default login: `admin` / `admin123`
+
+Optional compatibility access can be added with `BACKEND_PORT=<port>` if you want the same app exposed on a second host port.
+
+If you redeploy without `APP_PORT` or `BACKEND_PORT` overrides, the installer
+reuses the current host mapping. Set `BACKEND_PORT=none` on the next restart if
+you want to remove the compatibility alias.
 
 Change the default credentials immediately in `Settings`.
 
@@ -66,7 +76,7 @@ Examples:
 If you need the pinned merged runtime from the old line:
 
 This section is intentional compatibility guidance for coexistence or rollback,
-not the normal `2.0.0` runtime path.
+not the normal `2.0.1` runtime path.
 
 ```bash
 ./install-trishul-snmp-suite-v1.4.1.sh up
@@ -92,7 +102,7 @@ It also accepts the same `--platform` and `--image` overrides.
 
 ## Runtime Model
 
-The current `2.0.0` path is built around:
+The current `2.0.1` path is built around:
 
 - `backend/app` as the live FastAPI runtime
 - `frontend/` as the authored release shell copied into `frontend/dist`
@@ -138,8 +148,9 @@ Typical verification commands from the repo root:
 
 ```bash
 npm --prefix frontend run build
-.venv/bin/pytest backend/tests/test_v2_schema.py backend/tests/test_v2_bootstrap.py backend/tests/test_operator_ui_routes.py backend/tests/test_v2_bundles.py backend/tests/test_v2_runtime.py backend/tests/test_v2_persistence.py backend/tests/test_v2_session.py backend/tests/test_v2_system.py -q
-.venv/bin/python scripts/run_release_gate.py
+.venv/bin/python -m pytest backend/ -q
+.venv/bin/python scripts/check_backend_coverage.py
+docker build -t trishul-snmp-suite-local:rc .
 ```
 
 For Docker-backed local validation:
@@ -152,16 +163,17 @@ For Docker-backed local validation:
 
 ## Roadmap
 
-The current `2.0.0` line delivers the rewritten backend platform, SQLite
-persistence, the compatibility bridge for the current shell, and the shipped operator UI.
+The current `2.0.1` line delivers the rewritten backend platform, SQLite
+persistence, the bundle-first MIB pipeline, and the shipped operator UI with
+the current hotfix cleanup around source-group inventory, realtime traps, and
+deployment defaults.
 
 The first planned `2.1.0` follow-up keeps the current operator shell and
 surfaces backend-delivered features that are not yet exposed in the UI, such as
 bundle lifecycle controls, saved profiles, notification replay, direct manager
-operations, and system diagnostics. See
-[docs/plan_v2.1/backend_frontend_gaps.md](docs/plan_v2.1/backend_frontend_gaps.md).
+operations, and system diagnostics.
 
-Deferred beyond `2.0.0`:
+Deferred beyond `2.0.x`:
 
 - SNMPv3 runtime and UI parity
 - writable `SET` responder behavior
@@ -169,8 +181,7 @@ Deferred beyond `2.0.0`:
 - one-click ecosystem demo flows
 - distributed polling or orchestration features
 
-See [docs/roadmap.md](docs/roadmap.md) and
-[docs/plan_v2.0/](docs/plan_v2.0/index.md) for the current planning state.
+See [docs/roadmap.md](docs/roadmap.md), [docs/issue_tracker.md](docs/issue_tracker.md), and [docs/changelog.md](docs/changelog.md) for the maintained release record.
 
 ## Contributing
 
