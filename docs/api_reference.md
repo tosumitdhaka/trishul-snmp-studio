@@ -1,6 +1,6 @@
 # API Reference
 
-This is the practical API reference for the current `2.0.1` runtime.
+This is the practical API reference for the current `2.x` runtime.
 
 For complete request and response schemas, use the OpenAPI document served by
 the running app at `/docs`.
@@ -113,6 +113,7 @@ Send request:
 - `POST /api/mibs/reload` — recompile all uploaded MIBs
 - `POST /api/mibs/fetch-dependencies` — fetch missing dependency MIBs
 - `POST /api/mibs/export` — export catalog as JSON or CSV
+- `POST /api/mibs/download` — download one stored MIB source or a zip of multiple source files
 - `DELETE /api/mibs/file` — delete one uploaded MIB file (body: `{"path": "..."}`)
 - `POST /api/mibs/delete-batch` — delete multiple uploaded MIB files
 - `DELETE /api/mibs/{filename:path}` — delete by path (URL-encoded)
@@ -127,6 +128,49 @@ the per-source inventory view:
 
 Source-group export requests keep source-group membership. Global or all-module
 exports stay deduplicated to the active runtime bundle.
+
+Catalog export request body:
+
+```json
+{
+  "format": "json",
+  "modules": ["IF-MIB"],
+  "notifications": ["IF-MIB::linkDown"],
+  "source_groups": ["juniper"],
+  "export_type": "notifications"
+}
+```
+
+Supported `export_type` values:
+
+- `catalog`
+- `summary`
+- `modules`
+- `objects`
+- `notifications`
+
+Export responses always include `summary`, `filters`, and `metadata`. JSON
+exports may also include:
+
+- `modules`
+- `objects`
+- `notifications`
+- `notification_members`
+
+For `notifications`, JSON stays notification-centric and nests the resolved
+member details under each notification entry. CSV flattens those member details
+into one row per member while retaining the parent notification identity.
+
+Raw source download request body:
+
+```json
+{
+  "paths": ["juniper/JUNIPER-MAG-MIB.mib", "juniper/JUNIPER-IF-MIB.mib"]
+}
+```
+
+`POST /api/mibs/download` returns the original source file for a single path, or
+a zip archive when multiple managed source files are requested.
 
 Upload request (multipart):
 - field: `files[]` — one or more `.mib`, `.txt`, or `.my` files

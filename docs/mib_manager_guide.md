@@ -1,6 +1,6 @@
 # MIB Manager Guide
 
-The current `2.0.1` release UI keeps `MIB Manager` as the main page for loading
+The current `2.x` UI keeps `MIB Manager` as the main page for loading
 and maintaining MIB files.
 
 ## What The Page Covers
@@ -8,10 +8,12 @@ and maintaining MIB files.
 `MIB Manager` is the place to:
 
 - review loaded and failed MIB files
+- filter source inventory by source group plus one scoped search field
 - validate a batch before upload
 - upload and reload MIBs
 - fetch missing dependencies from approved remote sources
-- export the active catalog by scope and type
+- export the active catalog by scope and type, including selected MIB modules
+- download one stored MIB source file or a zip of selected source files
 - inspect the current trap catalog exposed by loaded MIBs
 - delete uploaded MIB files
 
@@ -53,7 +55,7 @@ The status section shows:
 Use this section after every upload or reload so you do not assume a file was
 accepted just because the HTTP request succeeded.
 
-In `2.0.1`, the status model has two distinct views:
+The status model has two distinct views:
 
 - `All modules` / active bundle stays deduplicated to the effective runtime set
 - source-group views use per-source inventory and keep duplicate membership visible
@@ -105,9 +107,10 @@ Typical examples:
 - upload a vendor MIB while only an `auto-fetched/` copy exists:
   the vendor copy becomes active after upload or reload
 
-Source-group exports use the active aggregate result, not every stored duplicate
-copy. If a module is currently active from `common/`, exporting `juniper` will
-not include it until the active source changes.
+Source-group exports follow source-group membership even when the active runtime
+copy was promoted from a different stored source. This keeps duplicate
+membership visible in per-group exports without turning shadowed copies into
+runtime failures.
 
 ## Trap Catalog
 
@@ -123,6 +126,28 @@ Use it to:
 
 The page also exposes scoped catalog export actions so you can export the active
 catalog or notification-focused slices in JSON or CSV.
+
+For module-wise export:
+
+- select one or more rows in `MIB Sources`
+- choose the export `Content` on the right-side export card
+- use `JSON` or `CSV` from the source toolbar
+
+Selected export uses loaded module names from the current view. Rows that are
+not part of the active bundle yet, such as pending or failed sources, are not
+included in the export payload.
+
+For raw source download:
+
+- use `MIB` on a single row to download that stored source file
+- use `MIB` from the source toolbar to download the selected stored source files
+- multiple selected source files are packaged as a zip archive
+
+The source filter now uses:
+
+- `Source Group` to scope the inventory first
+- `Scope` to choose `All`, `Module`, `Imports`, or `Path`
+- one search box that applies only to the selected scope
 
 ## Delete And Reload
 

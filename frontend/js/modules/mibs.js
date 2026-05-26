@@ -90,11 +90,16 @@ window.MibsModule = {
                 this.validateFiles();
             }
         });
-        this.bindDomEvent(document.getElementById('mib-filter-query'), 'input', () => {
-            this.handleMibFilterChange();
+        ['mib-filter-query', 'mib-filter-scope'].forEach((id) => {
+            this.bindDomEvent(document.getElementById(id), id === 'mib-filter-query' ? 'input' : 'change', () => {
+                this.handleMibFilterChange();
+            });
         });
         this.bindDomEvent(document.getElementById('mib-filter-source-group'), 'change', () => {
             this.handleMibFilterChange();
+        });
+        this.bindDomEvent(document.getElementById('mib-export-type'), 'change', () => {
+            this.updateMibSelectionState();
         });
     },
 
@@ -238,7 +243,7 @@ window.MibsModule = {
         const filters = this.getMibFilterState();
         const scopedMibs = this.getScopedMibs(filters.sourceGroup);
         const mibs = this.getFilteredMibs();
-        const hasFilter = Boolean(filters.query || filters.sourceGroup);
+        const hasFilter = this.hasActiveMibFilters(filters);
 
         if (scopedMibs.length === 0 && !filters.query) {
             list.innerHTML = this.buildListPlaceholder({
@@ -267,10 +272,11 @@ window.MibsModule = {
         list.innerHTML = mibs.map(mib => {
             const path = this.mibPath(mib);
             const isDeleting = this.isDeletingMibPath(path);
+            const canDownloadRaw = this.isRawDownloadableMib(mib);
             return `
             <li class="list-group-item py-2 mib-list-item ${this.isMibSelected(mib) ? 'mib-list-item-selected' : ''}">
                 <div class="d-flex align-items-start gap-2">
-                    ${mib.deletable ? `
+                    ${path ? `
                         <div class="form-check mt-1 mb-0">
                             <input type="checkbox"
                                    class="form-check-input mib-selection-checkbox"
@@ -315,11 +321,27 @@ window.MibsModule = {
                             </div>
                         ` : ''}
                     </div>
-                ${mib.deletable ? `
-                    <button type="button" class="btn btn-sm btn-app-danger-outline mib-side-action" onclick="MibsModule.deleteMib(this.dataset.path)" data-path="${esc(path)}" ${isDeleting ? 'disabled aria-busy="true"' : ''}>
-                        <i class="fas ${isDeleting ? 'fa-spinner fa-spin' : 'fa-trash'}"></i>
-                    </button>
-                ` : ''}
+                <div class="d-flex align-items-center gap-1">
+                    ${canDownloadRaw ? `
+                        <button type="button" class="btn btn-sm btn-app-secondary btn-icon mib-side-action"
+                                onclick="MibsModule.downloadMib(this.dataset.path)"
+                                data-path="${esc(path)}"
+                                title="Download MIB source"
+                                aria-label="Download MIB source">
+                            <i class="fas fa-download"></i>
+                        </button>
+                    ` : ''}
+                    ${mib.deletable ? `
+                        <button type="button" class="btn btn-sm btn-app-danger-outline btn-icon mib-side-action"
+                                onclick="MibsModule.deleteMib(this.dataset.path)"
+                                data-path="${esc(path)}"
+                                title="Delete MIB source"
+                                aria-label="Delete MIB source"
+                                ${isDeleting ? 'disabled aria-busy="true"' : ''}>
+                            <i class="fas ${isDeleting ? 'fa-spinner fa-spin' : 'fa-trash'}"></i>
+                        </button>
+                    ` : ''}
+                </div>
                 </div>
             </li>
         `;
@@ -359,8 +381,23 @@ window.MibsModule = {
 
     getMibFilterState: function() {
         const sourceGroup = String(document.getElementById('mib-filter-source-group')?.value || '').trim().toLowerCase();
+        const scope = String(document.getElementById('mib-filter-scope')?.value || 'all').trim().toLowerCase() || 'all';
         const query = String(document.getElementById('mib-filter-query')?.value || '').trim().toLowerCase();
-        return { sourceGroup, query };
+        return { sourceGroup, scope, query };
+    },
+
+    hasActiveMibFilters: function(filters) {
+        return Boolean(
+            filters
+            && (filters.sourceGroup || filters.query)
+        );
+    },
+
+    matchesFilterValue: function(value, query) {
+        if (!query) {
+            return true;
+        }
+        return String(value || '').toLowerCase().includes(query);
     },
 
     getScopedMibs: function(sourceGroup) {
@@ -386,30 +423,97 @@ window.MibsModule = {
     getFilteredMibs: function() {
         const filters = this.getMibFilterState();
         return this.getScopedMibs(filters.sourceGroup).filter((mib) => {
-            if (!filters.query) {
-                return true;
-            }
-            const imports = Array.isArray(mib && mib.imports) ? mib.imports.join(' ') : '';
-            const searchText = [
-                mib && mib.name,
+            const moduleName = String(mib && mib.name ? mib.name : '').toLowerCase();
+            const imports = Array.isArray(mib && mib.imports) ? mib.imports.join(' ').toLowerCase() : '';
+            const relativePath = [
                 mib && mib.relative_path,
                 mib && mib.file,
-                mib && mib.source_group,
-                this.sourceLabel(mib),
-                mib && mib.status,
-                mib && mib.error,
                 mib && mib.active_relative_path,
-                imports,
             ]
                 .filter(Boolean)
                 .join(' ')
                 .toLowerCase();
-            return searchText.includes(filters.query);
+            const searchFields = {
+                all: [moduleName, imports, relativePath].join(' '),
+                module: moduleName,
+                imports,
+                path: relativePath,
+            };
+            return this.matchesFilterValue(searchFields[filters.scope] || searchFields.all, filters.query);
         });
+    },
+
+    getSelectedMibs: function() {
+        const selectedPaths = Array.from(this.selectedMibPaths);
+        if (selectedPaths.length === 0) {
+            return [];
+        }
+
+        const byPath = new Map();
+        [
+            ...(this.getFilteredMibs() || []),
+            ...((Array.isArray(this.sourceInventory) ? this.sourceInventory : [])),
+            ...((Array.isArray(this.allMibs) ? this.allMibs : [])),
+        ].forEach((mib) => {
+            const path = this.mibPath(mib);
+            if (path && !byPath.has(path)) {
+                byPath.set(path, mib);
+            }
+        });
+
+        return selectedPaths
+            .map((path) => byPath.get(path))
+            .filter(Boolean);
+    },
+
+    getSelectedDeletablePaths: function() {
+        return this.getSelectedMibs()
+            .filter((mib) => mib && mib.deletable && this.mibPath(mib))
+            .map((mib) => this.mibPath(mib));
+    },
+
+    isRawDownloadableMib: function(mib) {
+        return Boolean(mib && mib.deletable && this.mibPath(mib));
+    },
+
+    getSelectedDownloadablePaths: function() {
+        return this.getSelectedMibs()
+            .filter((mib) => this.isRawDownloadableMib(mib))
+            .map((mib) => this.mibPath(mib));
+    },
+
+    getSelectedExportModules: function() {
+        const skipped = [];
+        const modules = new Set();
+
+        this.getSelectedMibs().forEach((mib) => {
+            const status = String(mib && mib.status ? mib.status : 'active').toLowerCase();
+            const moduleName = String(mib && mib.name ? mib.name : '').trim();
+            const path = this.mibPath(mib) || moduleName;
+            if (!moduleName) {
+                skipped.push(path);
+                return;
+            }
+            if (['failed', 'invalid', 'missing_deps', 'pending'].includes(status)) {
+                skipped.push(path);
+                return;
+            }
+            modules.add(moduleName);
+        });
+
+        return {
+            modules: Array.from(modules).sort((left, right) => left.localeCompare(right)),
+            skippedCount: skipped.length,
+            selectedCount: this.selectedMibPaths.size,
+        };
     },
 
     getVisibleDeletableMibs: function() {
         return this.getFilteredMibs().filter(mib => mib && mib.deletable && this.mibPath(mib));
+    },
+
+    getVisibleSelectableMibs: function() {
+        return this.getFilteredMibs().filter(mib => mib && this.mibPath(mib));
     },
 
     handleMibFilterChange: function() {
@@ -430,7 +534,7 @@ window.MibsModule = {
     },
 
     selectVisibleMibs: function() {
-        this.getVisibleDeletableMibs().forEach(mib => {
+        this.getVisibleSelectableMibs().forEach(mib => {
             const path = this.mibPath(mib);
             if (path) this.selectedMibPaths.add(path);
         });
@@ -446,36 +550,72 @@ window.MibsModule = {
         const summary = document.getElementById('mib-selection-summary');
         const selectVisibleBtn = document.getElementById('mib-select-visible-btn');
         const clearSelectionBtn = document.getElementById('mib-clear-selection-btn');
+        const exportSelectedJsonBtn = document.getElementById('mib-export-selected-json-btn');
+        const exportSelectedCsvBtn = document.getElementById('mib-export-selected-csv-btn');
+        const downloadSelectedBtn = document.getElementById('mib-download-selected-btn');
         const deleteSelectedBtn = document.getElementById('mib-delete-selected-btn');
         const filteredMibs = this.getFilteredMibs();
-        const visibleDeletable = filteredMibs.filter(mib => mib && mib.deletable && this.mibPath(mib));
-        const selectedVisibleCount = visibleDeletable.filter(mib => this.isMibSelected(mib)).length;
+        const visibleSelectable = filteredMibs.filter(mib => mib && this.mibPath(mib));
+        const selectedVisibleCount = visibleSelectable.filter(mib => this.isMibSelected(mib)).length;
         const totalSelected = this.selectedMibPaths.size;
+        const totalDeletableSelected = this.getSelectedDeletablePaths().length;
+        const totalDownloadableSelected = this.getSelectedDownloadablePaths().length;
+        const totalExportableSelected = this.getSelectedExportModules().modules.length;
         const filters = this.getMibFilterState();
-        const filteredText = filters.query || filters.sourceGroup
+        const filteredText = this.hasActiveMibFilters(filters)
             ? `${filteredMibs.length} shown`
             : `${this.allMibs.length} MIBs`;
         const deleting = this.deletingMibPaths.size > 0;
+        const exportTypeLabel = this.getExportTypeLabel();
 
         if (summary) {
             let text = filteredText;
-            if (visibleDeletable.length > 0) {
+            if (visibleSelectable.length > 0) {
                 text += ` · ${selectedVisibleCount} selected`;
             }
             summary.textContent = text;
         }
         if (selectVisibleBtn) {
-            selectVisibleBtn.disabled = deleting || visibleDeletable.length === 0 || selectedVisibleCount === visibleDeletable.length;
+            selectVisibleBtn.disabled = deleting || visibleSelectable.length === 0 || selectedVisibleCount === visibleSelectable.length;
         }
         if (clearSelectionBtn) {
             clearSelectionBtn.disabled = deleting || totalSelected === 0;
         }
-        if (deleteSelectedBtn) {
-            deleteSelectedBtn.disabled = deleting || totalSelected === 0;
-            deleteSelectedBtn.innerHTML = deleting
-                ? '<i class="fas fa-spinner fa-spin me-1"></i> Deleting...'
-                : `<i class="fas fa-trash me-1"></i> Delete Selected${totalSelected > 0 ? ` (${totalSelected})` : ''}`;
+        if (exportSelectedJsonBtn) {
+            exportSelectedJsonBtn.disabled = deleting || totalExportableSelected === 0;
+            exportSelectedJsonBtn.title = `Export selected ${exportTypeLabel} as JSON`;
         }
+        if (exportSelectedCsvBtn) {
+            exportSelectedCsvBtn.disabled = deleting || totalExportableSelected === 0;
+            exportSelectedCsvBtn.title = `Export selected ${exportTypeLabel} as CSV`;
+        }
+        if (downloadSelectedBtn) {
+            downloadSelectedBtn.disabled = deleting || totalDownloadableSelected === 0;
+            downloadSelectedBtn.title = totalDownloadableSelected > 1
+                ? 'Download selected MIB source files as zip'
+                : 'Download selected MIB source file';
+        }
+        if (deleteSelectedBtn) {
+            deleteSelectedBtn.disabled = deleting || totalDeletableSelected === 0;
+            deleteSelectedBtn.innerHTML = deleting
+                ? '<i class="fas fa-spinner fa-spin"></i>'
+                : '<i class="fas fa-trash"></i>';
+        }
+    },
+
+    getExportType: function() {
+        return String(document.getElementById('mib-export-type')?.value || 'catalog').trim() || 'catalog';
+    },
+
+    getExportTypeLabel: function() {
+        const labels = {
+            catalog: 'full catalog',
+            summary: 'summary',
+            modules: 'modules',
+            objects: 'objects',
+            notifications: 'notifications',
+        };
+        return labels[this.getExportType()] || 'catalog data';
     },
 
     sourceLabel: function(mib) {
@@ -1151,7 +1291,76 @@ window.MibsModule = {
     },
 
     deleteSelectedMibs: async function() {
-        await this.deleteMibs(Array.from(this.selectedMibPaths));
+        await this.deleteMibs(this.getSelectedDeletablePaths());
+    },
+
+    exportSelectedMibs: async function(format = 'json') {
+        const selection = this.getSelectedExportModules();
+        if (selection.modules.length === 0) {
+            if (selection.selectedCount > 0) {
+                TrishulUtils.showNotification('Selected MIBs are not part of the active bundle yet', 'warning');
+            } else {
+                TrishulUtils.showNotification('Select at least one MIB to export', 'warning');
+            }
+            return;
+        }
+
+        const filters = this.getMibFilterState();
+        const result = await this.exportCatalog(format, {
+            export_type: this.getExportType(),
+            modules: selection.modules,
+            source_groups: filters.sourceGroup ? [filters.sourceGroup] : [],
+        });
+        if (result?.ok && selection.skippedCount > 0) {
+            TrishulUtils.showNotification(
+                `${selection.skippedCount} selected MIBs were skipped because they are not loaded in the active bundle`,
+                'warning',
+                5000,
+            );
+        }
+    },
+
+    downloadMib: async function(path) {
+        await this.downloadMibSources([path]);
+    },
+
+    downloadSelectedMibs: async function() {
+        await this.downloadMibSources(this.getSelectedDownloadablePaths());
+    },
+
+    downloadMibSources: async function(paths) {
+        const normalized = Array.from(
+            new Set(
+                (Array.isArray(paths) ? paths : [])
+                    .map((path) => String(path || '').trim())
+                    .filter(Boolean)
+            )
+        );
+        if (normalized.length === 0) {
+            TrishulUtils.showNotification('Select at least one stored MIB source to download', 'warning');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/mibs/download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths: normalized }),
+            });
+            if (!res.ok) {
+                const errorText = await res.text();
+                throw new Error(errorText || `Download failed (${res.status})`);
+            }
+            const blob = await res.blob();
+            const disposition = res.headers.get('Content-Disposition') || '';
+            const match = disposition.match(/filename=\"([^\"]+)\"/);
+            const filename = match ? match[1] : (normalized.length > 1 ? 'mibs.zip' : 'source.mib');
+            this.triggerDownload(blob, filename);
+            TrishulUtils.showNotification(`Download ready: ${filename}`, 'success');
+        } catch (e) {
+            console.error('MIB source download failed:', e);
+            TrishulUtils.showNotification(`MIB download failed: ${e.message}`, 'error', 5000);
+        }
     },
 
     deleteMibs: async function(paths) {
@@ -1332,9 +1541,11 @@ window.MibsModule = {
             const filename = match ? match[1] : `trishul-mibs.${payload.format === 'csv' ? 'csv' : 'json'}`;
             this.triggerDownload(blob, filename);
             TrishulUtils.showNotification(`Export ready: ${filename}`, 'success');
+            return { ok: true, filename };
         } catch (e) {
             console.error('Catalog export failed:', e);
             TrishulUtils.showNotification(`Catalog export failed: ${e.message}`, 'error', 5000);
+            return { ok: false, error: e };
         }
     },
 

@@ -4,13 +4,35 @@ All notable changes to Trishul SNMP Suite will be documented in this file.
 
 This file intentionally retains historical `1.x` release entries. Those
 sections are release history, not the operator source of truth for the shipped
-`2.0.1` UI or runtime behavior.
+`2.0.2` UI or runtime behavior.
 
-The current stable release line is `2.0.1`. The entries below `2.0.1` are
+The current stable release line is `2.0.2`. The entries below `2.0.2` are
 historical `1.x` releases retained for release history.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [2.0.2] - 2026-05-26
+
+### Added
+- **MIB Source Download** - `POST /api/mibs/download` now returns one stored source file directly or a zip archive for multiple selected managed MIB files.
+
+### Changed
+- **MIB Manager / Source Filtering** - The source inventory filter now uses `Source Group` plus a scoped search selector for `All`, `Module`, `Imports`, or `Path`.
+- **MIB Manager / Selected Actions** - The source toolbar now supports selected-module exports in JSON or CSV using the current export content type, raw `MIB` download for stored source files, and compact labeled `Select` / `Clear` actions.
+- **Catalog Export Shape** - Notification exports keep the nested notification-centric JSON view while CSV stays flattened per member; redundant flattened `*_full_name` and member `source_*` columns were removed from notification export payloads.
+- **Branding** - The sidebar branding now uses the full `Trishul SNMP Suite` name.
+
+### Fixed
+- **MIB Manager / Export Selection** - Selected row exports now skip non-loaded rows cleanly instead of producing misleading module-based output for pending or failed sources.
+- **MIB Manager / Raw Downloads** - Single-row and bulk source downloads now work directly from the current source inventory without requiring a catalog export workaround.
+- **Docs** - The API reference and MIB Manager guide now document scoped source filtering, selected-module exports, and raw source download behavior.
+
+### Migration Notes
+- No schema or data migration is required from `2.0.1`.
+- Existing `2.0.1` deployments can be restarted in place with the current installer to pick up the `2.0.2` backend and frontend assets.
 
 ---
 

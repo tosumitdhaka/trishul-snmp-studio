@@ -50,27 +50,51 @@
                                 <option value="">All source groups</option>
                             </select>
                         </div>
-                        <div class="col-lg-8">
-                            <label class="form-label small fw-bold mb-1" for="mib-filter-query">Filter</label>
+                        <div class="col-lg-3">
+                            <label class="form-label small fw-bold mb-1" for="mib-filter-scope">Scope</label>
+                            <select class="form-select form-select-sm" id="mib-filter-scope">
+                                <option value="all">All</option>
+                                <option value="module">Module</option>
+                                <option value="imports">Imports</option>
+                                <option value="path">Path</option>
+                            </select>
+                        </div>
+                        <div class="col-lg-5">
+                            <label class="form-label small fw-bold mb-1" for="mib-filter-query">Search</label>
                             <div class="input-group input-group-sm mib-filter-search">
                                 <span class="input-group-text">
                                     <i class="fas fa-search"></i>
                                 </span>
-                                <input type="text" class="form-control" id="mib-filter-query" placeholder="Name, path, import...">
+                                <input type="text" class="form-control" id="mib-filter-query" placeholder="Search current scope...">
                             </div>
                         </div>
                     </div>
                     <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mt-2">
                         <div class="small text-muted" id="mib-selection-summary">0 MIBs</div>
                         <div class="mib-selection-actions">
-                            <button type="button" class="btn btn-sm btn-app-secondary" id="mib-select-visible-btn" onclick="MibsModule.selectVisibleMibs()">
-                                <i class="fas fa-check-square me-1"></i> Select Visible
+                            <button type="button" class="btn btn-sm btn-app-secondary" id="mib-select-visible-btn" onclick="MibsModule.selectVisibleMibs()"
+                                    title="Select visible" aria-label="Select visible">
+                                <i class="fas fa-check-square me-1"></i> Select
                             </button>
-                            <button type="button" class="btn btn-sm btn-app-secondary" id="mib-clear-selection-btn" onclick="MibsModule.clearMibSelection()" disabled>
+                            <button type="button" class="btn btn-sm btn-app-secondary" id="mib-clear-selection-btn" onclick="MibsModule.clearMibSelection()" disabled
+                                    title="Clear selection" aria-label="Clear selection">
                                 <i class="fas fa-times me-1"></i> Clear
                             </button>
-                            <button type="button" class="btn btn-sm btn-app-danger-outline" id="mib-delete-selected-btn" onclick="MibsModule.deleteSelectedMibs()" disabled>
-                                <i class="fas fa-trash me-1"></i> Delete Selected
+                            <button type="button" class="btn btn-sm btn-app-secondary" id="mib-export-selected-json-btn" onclick="MibsModule.exportSelectedMibs('json')" disabled
+                                    title="Export the selected MIB modules using the current Content selection">
+                                <i class="fas fa-download me-1"></i> JSON
+                            </button>
+                            <button type="button" class="btn btn-sm btn-app-secondary" id="mib-export-selected-csv-btn" onclick="MibsModule.exportSelectedMibs('csv')" disabled
+                                    title="Export the selected MIB modules using the current Content selection">
+                                <i class="fas fa-download me-1"></i> CSV
+                            </button>
+                            <button type="button" class="btn btn-sm btn-app-secondary" id="mib-download-selected-btn" onclick="MibsModule.downloadSelectedMibs()" disabled
+                                    title="Download selected source files as MIB or zip" aria-label="Download selected MIB source files">
+                                <i class="fas fa-download me-1"></i> MIB
+                            </button>
+                            <button type="button" class="btn btn-sm btn-app-danger-outline btn-icon" id="mib-delete-selected-btn" onclick="MibsModule.deleteSelectedMibs()" disabled
+                                    title="Delete selected" aria-label="Delete selected">
+                                <i class="fas fa-trash"></i>
                             </button>
                         </div>
                     </div>
@@ -114,7 +138,6 @@
                             <option value="modules">Modules</option>
                             <option value="objects">Objects</option>
                             <option value="notifications">Notifications</option>
-                            <option value="notification-members">Notification members</option>
                         </select>
                     </div>
                     <div class="col-lg-4">
@@ -144,6 +167,13 @@
                     </span>
                 </div>
                 <div class="app-card-header-actions mib-trap-toolbar">
+                    <div class="input-group input-group-sm mib-trap-search">
+                        <span class="input-group-text">
+                            <i class="fas fa-search"></i>
+                        </span>
+                        <input type="text" class="form-control" id="trap-search"
+                               placeholder="Search traps...">
+                    </div>
                     <div class="btn-group btn-group-sm catalog-export-buttons" role="group" aria-label="Trap export">
                         <button type="button" class="btn btn-app-secondary catalog-export-btn" onclick="MibsModule.exportTrapCatalog('json')">
                             <i class="fas fa-file-code"></i><span>JSON</span>
@@ -151,13 +181,6 @@
                         <button type="button" class="btn btn-app-secondary catalog-export-btn" onclick="MibsModule.exportTrapCatalog('csv')">
                             <i class="fas fa-file-csv"></i><span>CSV</span>
                         </button>
-                    </div>
-                    <div class="input-group input-group-sm mib-trap-search">
-                        <span class="input-group-text">
-                            <i class="fas fa-search"></i>
-                        </span>
-                        <input type="text" class="form-control" id="trap-search"
-                               placeholder="Search traps...">
                     </div>
                 </div>
             </div>

@@ -244,6 +244,42 @@ def test_export_route_returns_attachment_response(isolated_db, monkeypatch):
     )
 
 
+def test_download_route_returns_attachment_response(isolated_db, monkeypatch):
+    from app.api.routes import mibs as mibs_module
+
+    token = _login_token()
+    settings = isolated_db["settings"]
+    state = object()
+    bundle_service = object()
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(mibs_module, "_ctx", lambda: (settings, state, bundle_service))
+
+    def fake_download_mib_sources(*, paths, settings, state, bundle_service):
+        captured["args"] = (paths, settings, state, bundle_service)
+        return {
+            "filename": "TEST-MIB.mib",
+            "media_type": "application/octet-stream",
+            "content": b"TEST CONTENT",
+        }
+
+    monkeypatch.setattr(mibs_module.mibs_service, "download_mib_sources", fake_download_mib_sources)
+
+    response = mibs_module.download_mib_sources(
+        mibs_module.MibDownloadBody(paths=["vendor/TEST-MIB.mib"]),
+        x_auth_token=token,
+    )
+    assert response.body == b"TEST CONTENT"
+    assert response.media_type == "application/octet-stream"
+    assert response.headers["content-disposition"] == 'attachment; filename="TEST-MIB.mib"'
+    assert captured["args"] == (
+        ["vendor/TEST-MIB.mib"],
+        settings,
+        state,
+        bundle_service,
+    )
+
+
 def test_mib_mutation_routes_delegate_and_broadcast(isolated_db, monkeypatch):
     from app.api.routes import mibs as mibs_module
 

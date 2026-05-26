@@ -26,6 +26,10 @@ class MibDeleteBatchBody(BaseModel):
     paths: list[str] = Field(default_factory=list)
 
 
+class MibDownloadBody(BaseModel):
+    paths: list[str] = Field(default_factory=list)
+
+
 class CatalogExportBody(BaseModel):
     format: str = Field("json", min_length=1)
     modules: list[str] = Field(default_factory=list)
@@ -189,6 +193,29 @@ def export_mib_catalog(
         content=export_file["content"],
         media_type=str(export_file["media_type"]),
         headers={"Content-Disposition": f'attachment; filename="{export_file["filename"]}"'},
+    )
+
+
+@router.post("/mibs/download")
+def download_mib_sources(
+    body: MibDownloadBody,
+    x_auth_token: str | None = Header(default=None),
+) -> Response:
+    _require_auth(x_auth_token)
+    settings, state, bundle_service = _ctx()
+    try:
+        download_file = mibs_service.download_mib_sources(
+            paths=body.paths,
+            settings=settings,
+            state=state,
+            bundle_service=bundle_service,
+        )
+    except MibsError as exc:
+        _mibs_http(exc)
+    return Response(
+        content=download_file["content"],
+        media_type=str(download_file["media_type"]),
+        headers={"Content-Disposition": f'attachment; filename="{download_file["filename"]}"'},
     )
 
 

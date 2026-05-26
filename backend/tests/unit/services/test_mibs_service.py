@@ -854,7 +854,19 @@ def test_export_catalog_filters_and_export_types_cover_live_bundle_exports(isola
     assert catalog["filters"]["export_type"] == "catalog"
     assert catalog["summary"]["module_count"] == 1
     assert catalog["summary"]["notification_count"] == 1
+    assert catalog["summary"]["notification_member_count"] >= 1
     assert catalog["notifications"][0]["full_name"] == "IF-MIB::linkDown"
+    assert catalog["notifications"][0]["member_count"] == len(catalog["notifications"][0]["members"])
+    assert "full_name" not in catalog["notifications"][0]["members"][0]
+    assert "source_group" not in catalog["notifications"][0]["members"][0]
+    assert "source_kind" not in catalog["notifications"][0]["members"][0]
+    assert "source_relative_path" not in catalog["notifications"][0]["members"][0]
+    assert catalog["notification_members"]
+    assert all("member_full_name" not in item for item in catalog["notification_members"])
+    assert all("member_source_group" not in item for item in catalog["notification_members"])
+    assert all("member_source_kind" not in item for item in catalog["notification_members"])
+    assert all("member_source_relative_path" not in item for item in catalog["notification_members"])
+    assert all("notification_full_name" not in item for item in catalog["notification_members"])
     assert all(item["module"] == "IF-MIB" for item in catalog["objects"])
 
     objects_only = mibs_service.export_catalog(
@@ -933,8 +945,10 @@ def test_export_catalog_filters_and_export_types_cover_live_bundle_exports(isola
         state=state,
         bundle_service=bundle_service,
     )
+    assert summary_only["modules"] == []
     assert summary_only["objects"] == []
     assert summary_only["notifications"] == []
+    assert summary_only["notification_members"] == []
     assert summary_only["summary"]["module_count"] == 1
 
 
@@ -958,7 +972,14 @@ def test_export_catalog_file_supports_json_and_csv_formats(isolated_db):
     assert json_file["filename"] == "notification-if-mib-linkdown.json"
     assert json_file["media_type"] == "application/json"
     json_payload = json.loads(json_file["content"].decode("utf-8"))
+    assert json_payload["objects"] == []
     assert json_payload["notifications"][0]["full_name"] == "IF-MIB::linkDown"
+    assert json_payload["notifications"][0]["members"]
+    assert "full_name" not in json_payload["notifications"][0]["members"][0]
+    assert "source_group" not in json_payload["notifications"][0]["members"][0]
+    assert "source_kind" not in json_payload["notifications"][0]["members"][0]
+    assert "source_relative_path" not in json_payload["notifications"][0]["members"][0]
+    assert json_payload["notification_members"] == []
 
     csv_notifications = mibs_service.export_catalog_file(
         format="csv",
@@ -971,8 +992,12 @@ def test_export_catalog_file_supports_json_and_csv_formats(isolated_db):
     assert csv_notifications["filename"] == "notification-if-mib-linkdown.csv"
     assert csv_notifications["media_type"] == "text/csv"
     csv_notifications_text = csv_notifications["content"].decode("utf-8")
-    assert csv_notifications_text.splitlines()[0] == "module,name,oid,description"
+    assert (
+        csv_notifications_text.splitlines()[0]
+        == "notification_module,notification_name,notification_oid,notification_source_group,notification_source_kind,notification_source_relative_path,member_count,member_module,member_name,member_oid,syntax,type,status,input_type,position,enum_values,description,notification_description"
+    )
     assert "IF-MIB,linkDown,1.3.6.1.6.3.1.1.5.3" in csv_notifications_text
+    assert "IF-MIB,ifIndex,1.3.6.1.2.1.2.2.1.1" in csv_notifications_text
 
     csv_objects = mibs_service.export_catalog_file(
         format="csv",
@@ -983,11 +1008,150 @@ def test_export_catalog_file_supports_json_and_csv_formats(isolated_db):
         bundle_service=bundle_service,
     )
     assert csv_objects["filename"] == "objects-if-mib.csv"
-    assert csv_objects["content"].decode("utf-8").splitlines()[0] == "module,name,oid,type"
+    assert (
+        csv_objects["content"].decode("utf-8").splitlines()[0]
+        == "module,name,full_name,oid,nodetype,syntax,status,source_group,source_kind,source_relative_path,description"
+    )
+
+    csv_modules = mibs_service.export_catalog_file(
+        format="csv",
+        modules=["IF-MIB"],
+        export_type="modules",
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+    assert csv_modules["filename"] == "modules-if-mib.csv"
+    assert (
+        csv_modules["content"].decode("utf-8").splitlines()[0]
+        == "module_name,object_count,notification_count,source_group,source_kind,source_relative_path"
+    )
+
+    csv_summary = mibs_service.export_catalog_file(
+        format="csv",
+        modules=["IF-MIB"],
+        export_type="summary",
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+    assert csv_summary["filename"] == "summary-if-mib.csv"
+    csv_summary_text = csv_summary["content"].decode("utf-8")
+    assert csv_summary_text.splitlines()[0] == "key,value"
+    assert "module_count,1" in csv_summary_text
+
+    csv_catalog = mibs_service.export_catalog_file(
+        format="csv",
+        notifications=["IF-MIB::linkDown"],
+        export_type="catalog",
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+    assert csv_catalog["filename"].endswith(".csv")
+    csv_catalog_text = csv_catalog["content"].decode("utf-8")
+    assert (
+        csv_catalog_text.splitlines()[0]
+        == "entry_type,module,name,oid,kind,syntax,status,source_group,source_kind,source_relative_path,description,notification_module,notification_name,notification_oid,input_type,position,enum_values,object_count,notification_count,member_count"
+    )
+    assert "notification,IF-MIB,linkDown,1.3.6.1.6.3.1.1.5.3,notification" in csv_catalog_text
+
+    json_notification_members = mibs_service.export_catalog_file(
+        format="json",
+        notifications=["IF-MIB::linkDown"],
+        export_type="notification-members",
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+    assert json_notification_members["filename"] == "notification-members-if-mib-linkdown.json"
+    members_payload = json.loads(json_notification_members["content"].decode("utf-8"))
+    assert members_payload["notifications"] == []
+    assert members_payload["notification_members"]
+    assert members_payload["notification_members"][0]["notification_module"] == "IF-MIB"
+    assert members_payload["notification_members"][0]["notification_name"] == "linkDown"
+    assert "notification_full_name" not in members_payload["notification_members"][0]
+    assert "member_full_name" not in members_payload["notification_members"][0]
+    assert "member_source_group" not in members_payload["notification_members"][0]
+    assert "member_source_kind" not in members_payload["notification_members"][0]
+    assert "member_source_relative_path" not in members_payload["notification_members"][0]
+
+    csv_notification_members = mibs_service.export_catalog_file(
+        format="csv",
+        notifications=["IF-MIB::linkDown"],
+        export_type="notification-members",
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+    assert csv_notification_members["filename"] == "notification-members-if-mib-linkdown.csv"
+    assert (
+        csv_notification_members["content"].decode("utf-8").splitlines()[0]
+        == "notification_module,notification_name,notification_oid,notification_source_group,member_module,member_name,member_oid,syntax,type,status,input_type,position,enum_values,description"
+    )
 
     with pytest.raises(MibsError, match="Unsupported catalog export format"):
         mibs_service.export_catalog_file(
             format="xml",
+            settings=settings,
+            state=state,
+            bundle_service=bundle_service,
+        )
+
+
+def test_download_mib_sources_returns_single_file_or_zip(isolated_db):
+    from app.services import mibs_service
+    from app.services.state_store import StateStore
+
+    settings = isolated_db["settings"]
+    upload_root = settings.data_dir / "mibs"
+    first_path = upload_root / "juniper" / "JUNIPER-ONE.mib"
+    second_path = upload_root / "juniper" / "JUNIPER-TWO.mib"
+    first_path.parent.mkdir(parents=True, exist_ok=True)
+    first_path.write_text("JUNIPER-ONE DEFINITIONS ::= BEGIN\nEND\n")
+    second_path.write_text("JUNIPER-TWO DEFINITIONS ::= BEGIN\nEND\n")
+
+    state = StateStore(isolated_db["session_factory"])
+    bundle_service = _activate_mibs_bundle(isolated_db)
+
+    single = mibs_service.download_mib_sources(
+        ["juniper/JUNIPER-ONE.mib"],
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+    assert single["filename"] == "JUNIPER-ONE.mib"
+    assert single["media_type"] == "application/octet-stream"
+    assert b"JUNIPER-ONE" in single["content"]
+
+    multiple = mibs_service.download_mib_sources(
+        ["juniper/JUNIPER-ONE.mib", "juniper/JUNIPER-TWO.mib"],
+        settings=settings,
+        state=state,
+        bundle_service=bundle_service,
+    )
+    assert multiple["filename"] == "mib-sources.zip"
+    assert multiple["media_type"] == "application/zip"
+
+    import io
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(multiple["content"])) as archive:
+        assert sorted(archive.namelist()) == ["juniper/JUNIPER-ONE.mib", "juniper/JUNIPER-TWO.mib"]
+
+
+def test_download_mib_sources_rejects_missing_paths(isolated_db):
+    from app.services import mibs_service
+    from app.services.mibs_service import MibsError
+    from app.services.state_store import StateStore
+
+    settings = isolated_db["settings"]
+    state = StateStore(isolated_db["session_factory"])
+    bundle_service = _activate_mibs_bundle(isolated_db)
+
+    with pytest.raises(MibsError, match="Stored MIB source not found"):
+        mibs_service.download_mib_sources(
+            ["juniper/MISSING.mib"],
             settings=settings,
             state=state,
             bundle_service=bundle_service,

@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from io import BytesIO
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 import re
 from typing import Any
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from app.core.config import Settings
 from app.core.logging import emit_backend_log
@@ -51,20 +53,34 @@ def _export_basename(payload: dict[str, Any], *, export_type: str) -> str:
     metadata = payload.get("metadata") or {}
     notifications = payload.get("notifications") or []
     modules = payload.get("modules") or []
-
-    if export_type == "notifications" and len(notifications) == 1:
-        notification_name = (
-            notifications[0].get("full_name")
-            or notifications[0].get("name")
-            or "notification"
-        )
-        return f"notification-{_slug_fragment(notification_name, fallback='notification')}"
-
+    requested_notifications = filters.get("requested_notifications") or []
+    requested_modules = filters.get("requested_modules") or []
     requested_source_groups = filters.get("requested_source_groups") or []
-    if len(requested_source_groups) == 1:
-        scope = requested_source_groups[0]
+
+    if export_type in {"notifications", "notification-members"}:
+        if len(requested_notifications) == 1:
+            notification_name = requested_notifications[0]
+        elif len(notifications) == 1:
+            notification_name = (
+                notifications[0].get("full_name")
+                or notifications[0].get("name")
+                or "notification"
+            )
+        else:
+            notification_name = ""
+        if notification_name:
+            export_slug = "notification" if export_type == "notifications" else export_type
+            return (
+                f"{_slug_fragment(export_slug, fallback='notification')}-"
+                f"{_slug_fragment(notification_name, fallback='notification')}"
+            )
+
+    if len(requested_modules) == 1:
+        scope = requested_modules[0]
     elif len(modules) == 1:
         scope = modules[0].get("module_name") or modules[0].get("name")
+    elif len(requested_source_groups) == 1:
+        scope = requested_source_groups[0]
     else:
         scope = metadata.get("bundle_label") or metadata.get("bundle_key") or "active-bundle"
 
@@ -72,6 +88,82 @@ def _export_basename(payload: dict[str, Any], *, export_type: str) -> str:
         f"{_slug_fragment(export_type, fallback='catalog')}-"
         f"{_slug_fragment(scope, fallback='active-bundle')}"
     )
+
+
+def _input_type_for_syntax(syntax: str | None) -> str:
+    normalized = (syntax or "").split("(")[0].strip()
+    lowered = normalized.lower().replace("-", "")
+    if normalized in ("OBJECT IDENTIFIER", "AutonomousType") or lowered == "objectidentifier":
+        return "OID"
+    if "ipaddress" in lowered or "inetaddress" in lowered:
+        return "IpAddress"
+    if "timeticks" in lowered or "timestamp" in lowered:
+        return "TimeTicks"
+    if "counter64" in lowered or "counter" in lowered:
+        return "Counter"
+    if "gauge" in lowered or "unsigned" in lowered:
+        return "Gauge"
+    if "integer" in lowered or "truthvalue" in lowered or "rowstatus" in lowered or "interfaceindex" in lowered:
+        return "Integer"
+    return "String"
+
+
+def _enum_values_from_constraints(constraints: Any) -> list[dict[str, Any]]:
+    if not isinstance(constraints, dict) or constraints.get("kind") != "enum":
+        return []
+
+    enum_values: list[dict[str, Any]] = []
+    for item in constraints.get("data") or []:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            label, value = str(item[0]), item[1]
+        elif isinstance(item, dict):
+            label = str(item.get("name") or item.get("label") or item.get("symbol") or "")
+            value = item.get("value")
+        else:
+            continue
+        if isinstance(value, int):
+            enum_values.append({"label": label or str(value), "value": value})
+    return enum_values
+
+
+def _notification_member_payload(member, *, bundle) -> dict[str, Any]:
+    module_name = str(getattr(member, "module", "") or "").strip()
+    object_name = str(getattr(member, "object", "") or "").strip()
+    payload: dict[str, Any] = {
+        "module": module_name,
+        "name": object_name,
+        "oid": "",
+        "syntax": "",
+        "type": "",
+        "status": "",
+        "description": "",
+        "input_type": "String",
+    }
+
+    try:
+        node = bundle.resolve_node(module_name, object_name)
+    except Exception:
+        node = None
+
+    if node is None:
+        return payload
+
+    from trishul_snmp.mib.registry import oid_to_string
+
+    payload.update(
+        {
+            "oid": oid_to_string(node.oid) if node.oid else "",
+            "syntax": node.syntax or "",
+            "type": node.nodetype or node.object_type or "",
+            "status": node.status or "",
+            "description": node.description or "",
+            "input_type": _input_type_for_syntax(node.syntax),
+        }
+    )
+    enum_values = _enum_values_from_constraints(getattr(node, "constraints", None))
+    if enum_values:
+        payload["enum_values"] = enum_values
+    return payload
 
 
 def _bundle_summary_details(bundle_service) -> tuple[dict[str, dict[str, Any]], str, str]:
@@ -595,6 +687,63 @@ def delete_mibs(
     return mutation_svc.delete_uploaded_mibs(paths)
 
 
+def download_mib_sources(
+    paths: list[str],
+    *,
+    settings: Settings,
+    state: StateStore,
+    bundle_service,
+) -> dict[str, Any]:
+    source_svc = _make_source_service(settings, state, bundle_service)
+    normalized_paths = list(
+        OrderedDict.fromkeys(
+            str(path or "").strip().replace("\\", "/")
+            for path in (paths or [])
+            if str(path or "").strip()
+        )
+    )
+    if not normalized_paths:
+        raise MibsError("Select at least one stored MIB source to download.")
+
+    resolved_paths: list[tuple[str, Path]] = []
+    missing_paths: list[str] = []
+    for relative_path in normalized_paths:
+        try:
+            target = source_svc.uploaded_target_path(relative_path)
+        except MibsError:
+            missing_paths.append(relative_path)
+            continue
+        if not target.exists() or not target.is_file():
+            missing_paths.append(relative_path)
+            continue
+        resolved_paths.append((relative_path, target))
+
+    if missing_paths:
+        missing_preview = ", ".join(missing_paths[:5])
+        if len(missing_paths) > 5:
+            missing_preview += f", +{len(missing_paths) - 5} more"
+        raise MibsError(f"Stored MIB source not found: {missing_preview}")
+
+    if len(resolved_paths) == 1:
+        _relative_path, target = resolved_paths[0]
+        return {
+            "filename": target.name,
+            "media_type": "application/octet-stream",
+            "content": target.read_bytes(),
+        }
+
+    archive = BytesIO()
+    with ZipFile(archive, mode="w", compression=ZIP_DEFLATED) as bundle:
+        for relative_path, target in resolved_paths:
+            bundle.write(target, arcname=relative_path)
+
+    return {
+        "filename": "mib-sources.zip",
+        "media_type": "application/zip",
+        "content": archive.getvalue(),
+    }
+
+
 def export_catalog(
     *,
     format: str = "json",
@@ -612,6 +761,17 @@ def export_catalog(
         raise MibsError("No active MIB bundle is loaded.")
     from trishul_snmp.mib.registry import oid_to_string
     from app.services.mib_sources import MANAGED_UPLOAD_SOURCE_KINDS, ROOT_UPLOAD_SOURCE_GROUP
+
+    supported_export_types = {
+        "catalog",
+        "summary",
+        "modules",
+        "objects",
+        "notifications",
+        "notification-members",
+    }
+    if export_type not in supported_export_types:
+        raise MibsError(f"Unsupported catalog export type: {export_type}")
 
     source_svc = _make_source_service(settings, state, bundle_service)
     uploaded_inventory = source_svc.uploaded_source_inventory()
@@ -634,8 +794,14 @@ def export_catalog(
     result_modules = []
     result_notifications = []
     result_objects = []
+    result_notification_members = []
 
-    def module_source_details(module_name: str) -> dict[str, str] | None:
+    memberships_by_module: dict[str, list[dict[str, str]]] = {}
+    filtered_source_details_by_module: dict[str, dict[str, str] | None] = {}
+    def module_memberships(module_name: str) -> list[dict[str, str]]:
+        if module_name in memberships_by_module:
+            return memberships_by_module[module_name]
+
         source_path = _bundle_source_path_for_module(
             module_name,
             bundle_modules=bundle_modules,
@@ -668,21 +834,33 @@ def export_catalog(
                     )
                     seen_relative_paths.add(relative_path)
 
+        if not memberships:
+            memberships = [
+                {
+                    "source_group": "",
+                    "source_kind": "",
+                    "source_relative_path": "",
+                }
+            ]
+
+        memberships_by_module[module_name] = memberships
+        return memberships
+
+    def module_source_details(module_name: str) -> dict[str, str] | None:
+        if module_name in filtered_source_details_by_module:
+            return filtered_source_details_by_module[module_name]
+        memberships = module_memberships(module_name)
         if source_group_filter:
             for requested_group in requested_source_groups:
                 for membership in memberships:
                     if membership["source_group"] == requested_group:
+                        filtered_source_details_by_module[module_name] = membership
                         return membership
+            filtered_source_details_by_module[module_name] = None
             return None
 
-        if memberships:
-            return memberships[0]
-
-        return {
-            "source_group": "",
-            "source_kind": "",
-            "source_relative_path": "",
-        }
+        filtered_source_details_by_module[module_name] = memberships[0] if memberships else None
+        return filtered_source_details_by_module[module_name]
 
     for mod_name, mod_record in bundle.modules.items():
         if mod_filter and mod_name not in mod_filter:
@@ -690,19 +868,57 @@ def export_catalog(
         module_source = module_source_details(mod_name)
         if module_source is None:
             continue
-        mod_notifications = [
-            {
-                "module": n.module,
-                "name": n.name,
-                "full_name": f"{n.module}::{n.name}",
-                "oid": oid_to_string(n.oid),
-                "description": n.description or "",
-                "source_group": module_source["source_group"],
-                "members": [{"module": m.module, "name": m.object} for m in (n.members or [])],
-            }
-            for n in mod_record.notifications.values()
-            if not notif_filter or f"{n.module}::{n.name}" in notif_filter
-        ]
+
+        mod_notifications = []
+        for notification in mod_record.notifications.values():
+            notification_full_name = f"{notification.module}::{notification.name}"
+            if notif_filter and notification_full_name not in notif_filter:
+                continue
+
+            members = []
+            for position, member in enumerate(notification.members or [], start=1):
+                member_payload = _notification_member_payload(
+                    member,
+                    bundle=bundle,
+                )
+                member_payload["position"] = position
+                members.append(member_payload)
+                result_notification_members.append(
+                    {
+                        "notification_module": notification.module,
+                        "notification_name": notification.name,
+                        "notification_oid": oid_to_string(notification.oid),
+                        "notification_source_group": module_source["source_group"],
+                        "notification_source_kind": module_source["source_kind"],
+                        "notification_source_relative_path": module_source["source_relative_path"],
+                        "member_module": member_payload["module"],
+                        "member_name": member_payload["name"],
+                        "member_oid": member_payload["oid"],
+                        "syntax": member_payload["syntax"],
+                        "type": member_payload["type"],
+                        "status": member_payload["status"],
+                        "description": member_payload["description"],
+                        "input_type": member_payload["input_type"],
+                        "enum_values": member_payload.get("enum_values", []),
+                        "position": position,
+                    }
+                )
+
+            mod_notifications.append(
+                {
+                    "module": notification.module,
+                    "name": notification.name,
+                    "full_name": notification_full_name,
+                    "oid": oid_to_string(notification.oid),
+                    "description": notification.description or "",
+                    "source_group": module_source["source_group"],
+                    "source_kind": module_source["source_kind"],
+                    "source_relative_path": module_source["source_relative_path"],
+                    "member_count": len(members),
+                    "members": members,
+                }
+            )
+
         mod_objects = [
             {
                 "module": o.module,
@@ -714,6 +930,8 @@ def export_catalog(
                 "status": o.status or "",
                 "description": o.description or "",
                 "source_group": module_source["source_group"],
+                "source_kind": module_source["source_kind"],
+                "source_relative_path": module_source["source_relative_path"],
             }
             for o in mod_record.objects.values()
         ]
@@ -728,14 +946,29 @@ def export_catalog(
         result_notifications.extend(mod_notifications)
         result_objects.extend(mod_objects)
 
-    if export_type in ("catalog", "notifications"):
-        pass
+    summary = {
+        "module_count": len(result_modules),
+        "object_count": len(result_objects),
+        "notification_count": len(result_notifications),
+        "notification_member_count": len(result_notification_members),
+    }
+
+    if export_type == "notifications":
+        result_objects = []
+        result_notification_members = []
     elif export_type == "objects":
         result_notifications = []
+        result_notification_members = []
     elif export_type == "modules":
         result_notifications = []
         result_objects = []
+        result_notification_members = []
     elif export_type == "summary":
+        result_modules = []
+        result_notifications = []
+        result_objects = []
+        result_notification_members = []
+    elif export_type == "notification-members":
         result_notifications = []
         result_objects = []
 
@@ -744,22 +977,19 @@ def export_catalog(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "filters": {
             "export_type": export_type,
-            "requested_modules": list(mod_filter) if mod_filter else [],
-            "requested_notifications": list(notif_filter) if notif_filter else [],
+            "requested_modules": sorted(mod_filter) if mod_filter else [],
+            "requested_notifications": sorted(notif_filter) if notif_filter else [],
             "requested_source_groups": requested_source_groups,
         },
         "metadata": {
             "bundle_label": bundle_label,
             "bundle_key": bundle_key,
         },
-        "summary": {
-            "module_count": len(result_modules),
-            "object_count": len(result_objects),
-            "notification_count": len(result_notifications),
-        },
+        "summary": summary,
         "modules": result_modules,
         "objects": result_objects,
         "notifications": result_notifications,
+        "notification_members": result_notification_members,
     }
 
 
@@ -794,16 +1024,284 @@ def export_catalog_file(
         }
     if normalized_format == "csv":
         import csv, io
-        out = io.StringIO()
+        out = io.StringIO(newline="")
         writer = csv.writer(out)
-        if export_type == "notifications":
-            writer.writerow(["module", "name", "oid", "description"])
-            for n in payload.get("notifications", []):
-                writer.writerow([n["module"], n["name"], n["oid"], n.get("description", "")])
+        if export_type == "summary":
+            writer.writerow(["key", "value"])
+            writer.writerow(["bundle_label", payload.get("metadata", {}).get("bundle_label", "")])
+            writer.writerow(["bundle_key", payload.get("metadata", {}).get("bundle_key", "")])
+            for key, value in (payload.get("summary") or {}).items():
+                writer.writerow([key, value])
+            for key, value in (payload.get("filters") or {}).items():
+                if isinstance(value, list):
+                    writer.writerow([key, ", ".join(str(item) for item in value)])
+                else:
+                    writer.writerow([key, value])
+        elif export_type == "modules":
+            writer.writerow(
+                [
+                    "module_name",
+                    "object_count",
+                    "notification_count",
+                    "source_group",
+                    "source_kind",
+                    "source_relative_path",
+                ]
+            )
+            for module in payload.get("modules", []):
+                writer.writerow(
+                    [
+                        module.get("module_name", ""),
+                        module.get("object_count", 0),
+                        module.get("notification_count", 0),
+                        module.get("source_group", ""),
+                        module.get("source_kind", ""),
+                        module.get("source_relative_path", ""),
+                    ]
+                )
+        elif export_type == "objects":
+            writer.writerow(
+                [
+                    "module",
+                    "name",
+                    "full_name",
+                    "oid",
+                    "nodetype",
+                    "syntax",
+                    "status",
+                    "source_group",
+                    "source_kind",
+                    "source_relative_path",
+                    "description",
+                ]
+            )
+            for obj in payload.get("objects", []):
+                writer.writerow(
+                    [
+                        obj.get("module", ""),
+                        obj.get("name", ""),
+                        obj.get("full_name", ""),
+                        obj.get("oid", ""),
+                        obj.get("nodetype", ""),
+                        obj.get("syntax", ""),
+                        obj.get("status", ""),
+                        obj.get("source_group", ""),
+                        obj.get("source_kind", ""),
+                        obj.get("source_relative_path", ""),
+                        obj.get("description", ""),
+                    ]
+                )
+        elif export_type == "notifications":
+            writer.writerow(
+                [
+                    "notification_module",
+                    "notification_name",
+                    "notification_oid",
+                    "notification_source_group",
+                    "notification_source_kind",
+                    "notification_source_relative_path",
+                    "member_count",
+                    "member_module",
+                    "member_name",
+                    "member_oid",
+                    "syntax",
+                    "type",
+                    "status",
+                    "input_type",
+                    "position",
+                    "enum_values",
+                    "description",
+                    "notification_description",
+                ]
+            )
+            for notification in payload.get("notifications", []):
+                members = notification.get("members") or [{}]
+                for index, member in enumerate(members, start=1):
+                    writer.writerow(
+                        [
+                            notification.get("module", ""),
+                            notification.get("name", ""),
+                            notification.get("oid", ""),
+                            notification.get("source_group", ""),
+                            notification.get("source_kind", ""),
+                            notification.get("source_relative_path", ""),
+                            notification.get("member_count", 0),
+                            member.get("module", ""),
+                            member.get("name", ""),
+                            member.get("oid", ""),
+                            member.get("syntax", ""),
+                            member.get("type", ""),
+                            member.get("status", ""),
+                            member.get("input_type", ""),
+                            member.get("position", index if member else 0),
+                            json.dumps(member.get("enum_values", []), ensure_ascii=False),
+                            member.get("description", ""),
+                            notification.get("description", ""),
+                        ]
+                    )
+        elif export_type == "notification-members":
+            writer.writerow(
+                [
+                    "notification_module",
+                    "notification_name",
+                    "notification_oid",
+                    "notification_source_group",
+                    "member_module",
+                    "member_name",
+                    "member_oid",
+                    "syntax",
+                    "type",
+                    "status",
+                    "input_type",
+                    "position",
+                    "enum_values",
+                    "description",
+                ]
+            )
+            for member in payload.get("notification_members", []):
+                writer.writerow(
+                    [
+                        member.get("notification_module", ""),
+                        member.get("notification_name", ""),
+                        member.get("notification_oid", ""),
+                        member.get("notification_source_group", ""),
+                        member.get("member_module", ""),
+                        member.get("member_name", ""),
+                        member.get("member_oid", ""),
+                        member.get("syntax", ""),
+                        member.get("type", ""),
+                        member.get("status", ""),
+                        member.get("input_type", ""),
+                        member.get("position", 0),
+                        json.dumps(member.get("enum_values", []), ensure_ascii=False),
+                        member.get("description", ""),
+                    ]
+                )
         else:
-            writer.writerow(["module", "name", "oid", "type"])
-            for o in payload.get("objects", []):
-                writer.writerow([o["module"], o["name"], o["oid"], o.get("nodetype", "")])
+            writer.writerow(
+                [
+                    "entry_type",
+                    "module",
+                    "name",
+                    "oid",
+                    "kind",
+                    "syntax",
+                    "status",
+                    "source_group",
+                    "source_kind",
+                    "source_relative_path",
+                    "description",
+                    "notification_module",
+                    "notification_name",
+                    "notification_oid",
+                    "input_type",
+                    "position",
+                    "enum_values",
+                    "object_count",
+                    "notification_count",
+                    "member_count",
+                ]
+            )
+            for module in payload.get("modules", []):
+                writer.writerow(
+                    [
+                        "module",
+                        module.get("module_name", ""),
+                        module.get("module_name", ""),
+                        "",
+                        "module",
+                        "",
+                        "",
+                        module.get("source_group", ""),
+                        module.get("source_kind", ""),
+                        module.get("source_relative_path", ""),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        module.get("object_count", 0),
+                        module.get("notification_count", 0),
+                        "",
+                    ]
+                )
+            for obj in payload.get("objects", []):
+                writer.writerow(
+                    [
+                        "object",
+                        obj.get("module", ""),
+                        obj.get("name", ""),
+                        obj.get("oid", ""),
+                        obj.get("nodetype", ""),
+                        obj.get("syntax", ""),
+                        obj.get("status", ""),
+                        obj.get("source_group", ""),
+                        obj.get("source_kind", ""),
+                        obj.get("source_relative_path", ""),
+                        obj.get("description", ""),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
+            for notification in payload.get("notifications", []):
+                writer.writerow(
+                    [
+                        "notification",
+                        notification.get("module", ""),
+                        notification.get("name", ""),
+                        notification.get("oid", ""),
+                        "notification",
+                        "",
+                        "",
+                        notification.get("source_group", ""),
+                        notification.get("source_kind", ""),
+                        notification.get("source_relative_path", ""),
+                        notification.get("description", ""),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        notification.get("member_count", 0),
+                    ]
+                )
+            for member in payload.get("notification_members", []):
+                writer.writerow(
+                    [
+                        "notification-member",
+                        member.get("member_module", ""),
+                        member.get("member_name", ""),
+                        member.get("member_oid", ""),
+                        member.get("type", ""),
+                        member.get("syntax", ""),
+                        member.get("status", ""),
+                        "",
+                        "",
+                        "",
+                        member.get("description", ""),
+                        member.get("notification_module", ""),
+                        member.get("notification_name", ""),
+                        member.get("notification_oid", ""),
+                        member.get("input_type", ""),
+                        member.get("position", 0),
+                        json.dumps(member.get("enum_values", []), ensure_ascii=False),
+                        "",
+                        "",
+                        "",
+                    ]
+                )
         return {
             "filename": f"{basename}.csv",
             "media_type": "text/csv",
